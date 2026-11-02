@@ -3363,12 +3363,18 @@ void vk_alias_stats(void) {
 // draws: attachments written (or a destination bound at all) end the aliases involved
 static void alias_draw_check(Prog *pr) {
     if (!naliases && !nstale) return;
-    if (nstale && pr) {  // sampled stale destinations catch up first
+    // Sampled live aliases must count as read before writing the draw's render targets.
+    // Otherwise the fishing water samples an uninitialized / stale scene copy, leaving the lake black.
+    // Same ordering fix as mamcjr/LASRecompAndroid commit 6f3fd786 (fishing issue #1).
+    if (pr && (nstale || (naliases && copy_lazy()))) {
         ShaderInfo *infos[2] = {pr->vi, pr->fi};
-        for (int sg = 0; sg < 2 && nstale; sg++)
-            for (int i = 0; i < (infos[sg] ? infos[sg]->ntex : 0) && nstale; i++) {
+        for (int sg = 0; sg < 2; sg++)
+            for (int i = 0; i < (infos[sg] ? infos[sg]->ntex : 0); i++) {
                 NvnTexture *t = shader_texture_object(sg, &infos[sg]->tex[i]);
-                if (t) alias_catch_up(t);
+                if (!t) continue;
+                if (nstale) alias_catch_up(t);
+                for (int k = 0; k < naliases; k++)
+                    if (aliases[k].dst == t) aliases[k].read = true;
             }
     }
     for (int i = 0; i < st.rt.ncolor; i++)
@@ -5803,6 +5809,17 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
             LOG("\n");
         }
     }
+#ifdef __ANDROID__
+    // Make copied textures coherent for compute passes too: catch up sampled stale aliases,
+    // and materialize any image aliases that the compute shader will write.
+    if (naliases || nstale)
+        for (int i = 0; i < cp->si->ntex; i++) {
+            NvnTexture *t = shader_texture_object(5, &cp->si->tex[i]);
+            if (!t) continue;
+            alias_catch_up(t);
+            if (cp->si->tex[i].is_image) alias_before_write(t, 0, "compute image");
+        }
+#endif
     vk_end_pass();
     VkCommandBuffer cb = vk_cmd();
     vk_full_barrier(cb);
