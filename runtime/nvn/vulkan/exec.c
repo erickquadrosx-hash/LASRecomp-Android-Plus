@@ -508,7 +508,52 @@ VkCommandBuffer vk_upload_cmd(void) {
     return s->upload;
 }
 
+// Experimental Mali optimisation: make fragment writes visible only to fragment,
+// compute and transfer consumers. Let the next pass begin its vertex/tiler work
+// while earlier fragments finish. From upstream #528 (tested on Mali-G610).
+// Keep the original full barrier as the fallback. This experiment is not yet
+// validated on the POCO X7 Pro Mali-G720 or all game locations.
+// LARECOMP_VK_SPLIT_BARRIER=0/1 forces original/experimental for comparisons.
+static int split_barrier = -1;
 void vk_full_barrier(VkCommandBuffer cb) {
+    if (split_barrier < 0) {
+        const char *e = getenv("LARECOMP_VK_SPLIT_BARRIER");
+#ifdef __ANDROID__
+        split_barrier = e && *e ? atoi(e) != 0 : g_vk.props.vendorID == 0x13B5;
+#else
+        split_barrier = e && *e ? atoi(e) != 0 : 0;
+#endif
+        if (split_barrier)
+            LOG("[vk] experimental split pass barriers enabled (Mali)\n");
+        else
+            LOG("[vk] original full pass barriers enabled\n");
+    }
+    if (split_barrier) {
+        const VkPipelineStageFlags2 frag = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+                                           VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                                           VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT |
+                                           VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        const VkPipelineStageFlags2 rest = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT |
+                                           VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT |
+                                           VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
+                                           VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
+                                           VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT |
+                                           VK_PIPELINE_STAGE_2_HOST_BIT;
+        VkMemoryBarrier2 mb[2] = {
+            {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2, .srcStageMask = frag,
+             .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+             .dstStageMask = frag | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
+             .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT},
+            {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2, .srcStageMask = rest,
+             .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+             .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+             .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT}
+        };
+        VkDependencyInfo di = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 2,
+                               .pMemoryBarriers = mb};
+        rec_CmdPipelineBarrier2(cb, &di);
+        return;
+    }
     VkMemoryBarrier2 mb = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2, .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                            .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT, .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                            .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT};
