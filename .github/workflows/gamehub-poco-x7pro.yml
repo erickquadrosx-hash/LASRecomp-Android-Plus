@@ -1,0 +1,73 @@
+name: GameHub 6.3.2 - POCO X7 Pro Experimental
+on:
+  push:
+    branches: [gamehub-poco-x7pro-632]
+    paths:
+      - "gamehub-poco-x7pro/**"
+      - ".github/workflows/gamehub-poco-x7pro.yml"
+  workflow_dispatch:
+    inputs:
+      base_apk_url:
+        description: "HTTPS URL do APK 6.3.2 exato; sem credenciais"
+        required: true
+        type: string
+      expected_sha256:
+        description: "SHA256 do APK original enviado"
+        required: true
+        type: string
+
+jobs:
+  validate-or-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validar scripts
+        run: python -m py_compile gamehub-poco-x7pro/*.py
+      - name: Baixar base com SHA pinado
+        if: ${{ inputs.base_apk_url != '' }}
+        env:
+          APK_URL: ${{ inputs.base_apk_url }}
+          EXPECTED_SHA: ${{ inputs.expected_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$APK_URL" =~ ^https:// ]] || { echo "Somente HTTPS"; exit 1; }
+          [[ "$EXPECTED_SHA" == "e51456bd3fb1c041dbdf3c756878ce1ddb37dfdb933b266142b22354b7d50ed2" ]] || exit 1
+          curl -fL --retry 3 --max-time 300 "$APK_URL" -o /tmp/gamehub_base.apk
+          echo "$EXPECTED_SHA  /tmp/gamehub_base.apk" | sha256sum -c -
+      - name: Aplicar ajuste de bibliotecas nativas
+        if: ${{ inputs.base_apk_url != '' }}
+        run: python gamehub-poco-x7pro/repack.py /tmp/gamehub_base.apk /tmp/gamehub_unsigned.apk
+      - name: Preparar ferramentas de assinatura
+        if: ${{ inputs.base_apk_url != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOLS="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -name apksigner -print | sort -V | tail -1)"
+          ZIPALIGN="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -name zipalign -print | sort -V | tail -1)"
+          test -x "$TOOLS" && test -x "$ZIPALIGN"
+          echo "APKSIGNER=$TOOLS" >> "$GITHUB_ENV"
+          echo "ZIPALIGN=$ZIPALIGN" >> "$GITHUB_ENV"
+      - name: Assinar e verificar pacote
+        if: ${{ inputs.base_apk_url != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$ZIPALIGN" -P 16 -f 4 /tmp/gamehub_unsigned.apk /tmp/gamehub_aligned.apk
+          "$ZIPALIGN" -c -P 16 4 /tmp/gamehub_aligned.apk
+          keytool -genkeypair -keystore /tmp/personal.jks -storepass android -keypass android -alias personal -keyalg RSA -keysize 3072 -validity 3650 -dname "CN=Personal GameHub Poco X7 Pro" -noprompt
+          "$APKSIGNER" sign --ks /tmp/personal.jks --ks-pass pass:android --ks-key-alias personal --key-pass pass:android --v2-signing-enabled true --v1-signing-enabled false --out GameHub_632_PocoX7Pro_experimental.apk /tmp/gamehub_aligned.apk
+          "$APKSIGNER" verify --verbose --print-certs GameHub_632_PocoX7Pro_experimental.apk
+          unzip -t GameHub_632_PocoX7Pro_experimental.apk | tail -1
+          sha256sum GameHub_632_PocoX7Pro_experimental.apk
+      - uses: actions/upload-artifact@v4
+        if: ${{ inputs.base_apk_url != '' }}
+        with:
+          name: GameHub-PocoX7Pro-632-Experimental
+          path: GameHub_632_PocoX7Pro_experimental.apk
+          retention-days: 7
