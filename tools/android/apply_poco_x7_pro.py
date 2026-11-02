@@ -29,12 +29,12 @@ dev = "runtime/nvn/vulkan/device.c"
 replace_once(dev,
     '            const char *e = getenv("LARECOMP_HALF_NATIVE");\n'
     '            if (h12.shaderFloat16 && (!e || atoi(e))) f12.shaderFloat16 = VK_TRUE, maxwell_half_native = 1;',
-    '            // Mali-G720: default guest half arithmetic to conservative FP32.\n'
-    '            // Set LARECOMP_HALF_NATIVE=1 to opt back into native FP16.\n'
+    '            // Diagnostic: use native FP16 for Mali when supported by the driver.\n'
+    '            // LARECOMP_HALF_NATIVE=0 disables it for A/B comparison.\n'
     '            const bool arm_mali = g_vk.props.vendorID == 0x13B5 &&\n'
     '                (strstr(g_vk.props.deviceName, "Mali") || strstr(g_vk.props.deviceName, "mali"));\n'
     '            const char *e = getenv("LARECOMP_HALF_NATIVE");\n'
-    '            const bool use_fp16 = e && *e ? atoi(e) != 0 : !arm_mali;\n'
+    '            const bool use_fp16 = !e || !*e || atoi(e) != 0;\n'
     '            if (h12.shaderFloat16 && use_fp16) f12.shaderFloat16 = VK_TRUE, maxwell_half_native = 1;\n'
     '            if (arm_mali) LOG("[vk] ARM Mali: guest half math %s\\n",\n'
     '                              maxwell_half_native ? "native FP16" : "conservative FP32");')
