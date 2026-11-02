@@ -29,7 +29,9 @@ android {
         // POCO X7 Pro default-profile build: standalone install, preserves prior test apps and their saves.
         // Opt-in performance experiment, independent from the approved baseline and its saves.
         // Additional isolated Vulkan performance test, never replaces approved APK or previous performance test.
-        if (project.hasProperty('lasPocoPerf2Id')) applicationIdSuffix '.pocoperf2'
+        // Mali G720 graphics hotfix is a separate app to protect existing saves.
+        if (project.hasProperty('lasPocoGraphicsFixId')) applicationIdSuffix '.pocofix'
+        else if (project.hasProperty('lasPocoPerf2Id')) applicationIdSuffix '.pocoperf2'
         else if (project.hasProperty('lasPocoPerfId')) applicationIdSuffix '.pocoperf'
         else if (project.hasProperty('lasPocoStableId')) applicationIdSuffix '.pocostable'
         else if (project.hasProperty('lasMaliFoliageId')) applicationIdSuffix '.malifoliage'
