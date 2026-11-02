@@ -1,8 +1,8 @@
-name: Build POCO X7 Pro Stable Video Defaults ARM64 APK
+name: Build POCO X7 Pro Mali Performance Experiment ARM64
 on:
   push:
     branches:
-      - poco-x7-pro-stable-video-defaults
+      - poco-x7-pro-perf-v1.3-experimental
   workflow_dispatch:
 permissions:
   contents: read
@@ -58,6 +58,7 @@ jobs:
         run: |
           python3 tools/test_settings.py
           python3 tools/test_poco_video_defaults.py
+          python3 tools/test_poco_mali_shader_opt.py
       - name: Compile native dependencies
         run: |
           export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}"
@@ -72,9 +73,9 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew --no-daemon --stacktrace assembleRelease -PonDeviceBuild=true -PlasPocoStableId -PlasVersionName=1.2.0-poco-x7-stable -PlasVersionCode=1204
+          ./gradlew --no-daemon --stacktrace assembleRelease -PonDeviceBuild=true -PlasPocoPerfId -PlasVersionName=1.2.0-poco-perf-experimental1 -PlasVersionCode=1301
           mkdir -p ../output
-          cp app/build/outputs/apk/release/app-release.apk ../output/LASRecomp_Poco_X7_Pro_1.2.0_STABLE_DEFAULTS.apk
+          cp app/build/outputs/apk/release/app-release.apk ../output/LASRecomp_Poco_X7_Pro_1.2.0_PERF_EXPERIMENTAL.apk
       - name: Verify APK signature and 16 KiB zip alignment
         run: |
           BT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}/build-tools/36.0.0"
@@ -84,7 +85,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LASRecomp-Poco-X7-Pro-Stable-Defaults-APK
+          name: LASRecomp-Poco-X7-Pro-Performance-Experimental-APK
           path: output/
           if-no-files-found: error
           retention-days: 14
