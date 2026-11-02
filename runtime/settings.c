@@ -28,7 +28,12 @@ const char *const g_screen_filters[N_SCREEN_FILTERS] = {"Off", "Game Boy", "Game
 static const char *const k_screen_filter_keys[N_SCREEN_FILTERS] = {"off", "gameboy", "gameboy_color", "grayscale"};  // (else: off)
 
 Settings g_settings = {
+#ifdef __ANDROID__
+    // Tested POCO X7 Pro profile: original 16:9 avoids side-region artifacts.
+    .aspect = ASPECT_ORIGINAL,
+#else
     .aspect = ASPECT_UNLOCKED,
+#endif
     .fullscreen = false,
     .volume = 1.0f,
     .reverb = true,
@@ -45,7 +50,11 @@ Settings g_settings = {
     .diff_damage = 1.0f,
     .walk_speed = 1.0f,
     .walk_speed_dungeons = false,
+#ifdef __ANDROID__
+    .upscaler = UPSCALE_BILINEAR,  // Tested Mali-G720 stable profile.
+#else
     .upscaler = UPSCALE_SHARP,  // (MetalFX on macOS, AMD FSR 1 on Windows)
+#endif
     .touch_opacity = 0.6f,
     .touch_size = 1.0f,
     .upscaler_auto = true,
@@ -55,8 +64,12 @@ Settings g_settings = {
     .bg_input = true,  // (as before the setting; on macOS it needs Input Monitoring permission, so Off there)
 #endif
 #ifdef __ANDROID__
-    .res_mode = RES_DYNAMIC,  // (phones: the display's resolution, down to 50% while the GPU can't hold 30 fps)
-    .frame_gen = 1,           // (phones: 60 on the screen from the game's 30)
+    // Native 60 (no interpolated frames), 1x internal resolution and balanced power.
+    // These are first-run defaults; a player's saved larecomp.ini still wins.
+    .res_mode = 1,
+    .frame_gen = 0,
+    .frame_rate = FRAME_RATE_NATIVE_60,
+    .power_mode = 0,
 #endif
 };
 
@@ -155,12 +168,12 @@ void settings_resolve_defaults(bool integrated) {
     const char *e = getenv("LARECOMP_INTEGRATED");
     if (e && *e) integrated = atoi(e) != 0;
 #ifdef __ANDROID__
-    // phones' GPUs are all integrated, and their defaults stay their own: SGSR (one cheap pass), the dynamic
-    // resolution (the display's, down to 50% while the GPU can't hold 30 fps), 1x = the Switch's 1080p
+    // POCO X7 Pro / Mali-G720 tested defaults. Keep the user-selectable
+    // "auto" settings pointing at this profile, while explicit choices win.
     integrated = false;
     g_gpu_integrated = false;
-    g_default_upscaler = UPSCALE_SHARP;
-    g_default_res_mode = RES_DYNAMIC;
+    g_default_upscaler = UPSCALE_BILINEAR;
+    g_default_res_mode = 1;
 #else
     g_gpu_integrated = integrated;
     g_default_upscaler = integrated ? UPSCALE_BILINEAR : UPSCALE_SHARP;
