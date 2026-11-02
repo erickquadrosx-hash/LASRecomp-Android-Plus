@@ -513,20 +513,20 @@ VkCommandBuffer vk_upload_cmd(void) {
 // while earlier fragments finish. From upstream #528 (tested on Mali-G610).
 // Keep the original full barrier as the fallback. This experiment is not yet
 // validated on the POCO X7 Pro Mali-G720 or all game locations.
-// LARECOMP_VK_SPLIT_BARRIER=0/1 forces original/experimental for comparisons.
+// LARECOMP_VK_SPLIT_BARRIER=1 is an explicit *opt-in* diagnostic only.
+// Disabled by default on every GPU: on Mali-G720, the V2 fishing video showed
+// two unrelated scenes interleaved and partially composited, consistent with
+// a missing dependency between render passes. Preserve full synchronization.
+// This is a conservative regression fix, not proof of a specific root cause.
 static int split_barrier = -1;
 void vk_full_barrier(VkCommandBuffer cb) {
     if (split_barrier < 0) {
         const char *e = getenv("LARECOMP_VK_SPLIT_BARRIER");
-#ifdef __ANDROID__
-        split_barrier = e && *e ? atoi(e) != 0 : g_vk.props.vendorID == 0x13B5;
-#else
-        split_barrier = e && *e ? atoi(e) != 0 : 0;
-#endif
+        split_barrier = e && *e && atoi(e) != 0;
         if (split_barrier)
-            LOG("[vk] experimental split pass barriers enabled (Mali)\n");
+            LOG("[vk] EXPERIMENTAL split pass barriers enabled by override\n");
         else
-            LOG("[vk] original full pass barriers enabled\n");
+            LOG("[vk] safe original full pass barriers enabled (Mali-G720 fix)\n");
     }
     if (split_barrier) {
         const VkPipelineStageFlags2 frag = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
