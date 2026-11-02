@@ -1,0 +1,103 @@
+name: Package PanVK G720 driver for LASRecomp Stable
+on:
+  push:
+    branches:
+      - poco-x7-pro-panvk-driver-pack
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  driver:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download verified upstream Mesa PanVK Android driver
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error --retry 4 --retry-all-errors \
+            --output /tmp/panvk-upstream.zip \
+            "https://github.com/zenithblue-oss/panvk-kbase-android/releases/download/panvk-kbase-v26.3.1/Mesa-PanVK-Android-v26.3.1-795ca7ff-adrenotools.zip"
+          printf '%s  %s\n' \
+            '7e2e9987bbebefb06f52b2570e61e6208503d4d3a10a395b97aea9b6e1fad9e4' \
+            '/tmp/panvk-upstream.zip' | sha256sum --check
+      - name: Adapt and validate installable LASRecomp driver ZIP
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile, ZIP_DEFLATED
+          from io import BytesIO
+          import hashlib, json, struct
+
+          source = Path('/tmp/panvk-upstream.zip')
+          outdir = Path('output')
+          outdir.mkdir(exist_ok=True)
+          out = outdir / 'Mesa_PanVK_Mali_G720_LASRecomp_Stable_26.3.1.zip'
+          with ZipFile(source) as src:
+              assert src.testzip() is None, 'Corrupted official ZIP'
+              candidates = {}
+              for entry in src.infolist():
+                  if entry.is_dir() or not entry.filename.lower().endswith('.so'):
+                      continue
+                  name = Path(entry.filename).name
+                  assert name not in candidates, f'Duplicate SO basename: {name}'
+                  data = src.read(entry)
+                  assert data[:4] == b'\x7fELF', f'{name} is not an ELF shared object'
+                  assert data[4] == 2 and data[5] == 1, f'{name} must be 64-bit little endian'
+                  assert struct.unpack_from('<H', data, 18)[0] == 183, f'{name} is not ARM64'
+                  candidates[name] = data
+              assert candidates, 'No Android ARM64 Vulkan driver libraries in upstream ZIP'
+              upstream_meta = None
+              for entry in src.namelist():
+                  if Path(entry).name == 'meta.json':
+                      try:
+                          upstream_meta = json.loads(src.read(entry).decode())
+                      except Exception:
+                          pass
+                      break
+          selected = upstream_meta.get('libraryName') if isinstance(upstream_meta, dict) else None
+          if selected not in candidates:
+              selected = sorted(candidates, key=lambda n: ('panfrost' not in n.lower(), 'vulkan' not in n.lower(), n))[0]
+          meta = {
+              'name': 'Mesa PanVK Mali G720 - LASRecomp (experimental)',
+              'driverVersion': 'Mesa 26.3.1 / 795ca7ff / kbase v6-v14',
+              'libraryName': selected
+          }
+          readme = """DRIVER EXPERIMENTAL / EXPERIMENTAL DRIVER
+          Projeto: Mesa PanVK para Android mali_kbase, build v26.3.1.
+          Origem oficial: https://github.com/zenithblue-oss/panvk-kbase-android/releases/tag/panvk-kbase-v26.3.1
+          Para LASRecomp Stable: menu Video > GPU driver > Install > escolha este ZIP.
+          Nao instale nas configuracoes do sistema Android. Mantenha a versao estavel
+          e os saves. Se houver falhas, desative o driver personalizado no LASRecomp.
+          Nao foi testado no POCO X7 Pro e NAO corrige bugs internos do jogo.
+          O driver foi recompacotado, NAO recompilado: binarios originais,
+          sem alteracoes. The original driver is experimental. Use at your own risk.
+          """
+          with ZipFile(out, 'w', ZIP_DEFLATED, compresslevel=6) as dst:
+              dst.writestr('meta.json', json.dumps(meta, indent=2, ensure_ascii=False) + '\n')
+              for name, data in candidates.items():
+                  dst.writestr(name, data)
+              dst.writestr('LEIA-ME.txt', readme)
+          with ZipFile(out) as check:
+              assert check.testzip() is None
+              names = check.namelist()
+              assert 'meta.json' in names and selected in names
+              assert all('/' not in n for n in names)
+              recorded = json.loads(check.read('meta.json'))
+              assert recorded['libraryName'] == selected
+              for name, original in candidates.items():
+                  assert hashlib.sha256(check.read(name)).digest() == hashlib.sha256(original).digest()
+          print('Upstream libraries:', ', '.join(candidates))
+          print('LASRecomp libraryName:', selected)
+          print('ZIP:', out, out.stat().st_size, 'bytes')
+          print('Original .so SHA256:', hashlib.sha256(candidates[selected]).hexdigest())
+          print('Output ZIP SHA256:', hashlib.sha256(out.read_bytes()).hexdigest())
+          (outdir / 'SHA256SUMS.txt').write_text(hashlib.sha256(out.read_bytes()).hexdigest() + '  ' + out.name + '\n')
+          PY
+      - name: Upload verified driver
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mesa-PanVK-G720-LASRecomp-Stable-Experimental
+          path: output/
+          if-no-files-found: error
+          retention-days: 14
