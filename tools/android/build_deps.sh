@@ -23,9 +23,23 @@ TC=$NDK/toolchains/llvm/prebuilt/$HOST
 CMAKE_ANDROID=(-DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" -DANDROID_ABI=arm64-v8a
                -DANDROID_PLATFORM=android-$API -DANDROID_STL=c++_static)
 
-fetch() {  # url sha256 file
-    [ -f "$S/$3" ] || { curl -fsSL -o "$S/$3.part" "$1" && mv "$S/$3.part" "$S/$3"; }
-    echo "$2  $S/$3" | shasum -a 256 -c --quiet
+fetch() {  # URL, expected sha256, basename (verified before publication)
+    local url="$1" want="$2" file="$S/$3" attempt
+    if [ -f "$file" ] && echo "$want  $file" | shasum -a 256 -c --quiet; then return 0; fi
+    rm -f "$file" "$file.part"
+    for attempt in 1 2 3 4 5; do
+        # FFmpeg's CDN can reset a large transfer; a partial download is never accepted.
+        if curl -fsSL --connect-timeout 30 --retry 3 --retry-delay 3 --retry-all-errors -o "$file.part" "$url" &&
+           echo "$want  $file.part" | shasum -a 256 -c --quiet; then
+            mv "$file.part" "$file"
+            return 0
+        fi
+        echo "Download / SHA-256 check failed: $3, attempt $attempt/5" >&2
+        rm -f "$file.part"
+        sleep "$((attempt * 3))"
+    done
+    echo "Could not fetch or verify $3" >&2
+    return 1
 }
 unpack() { rm -rf "$W/$2" && mkdir -p "$W/$2" && tar -xf "$S/$1" -C "$W/$2" --strip-components 1; }
 
