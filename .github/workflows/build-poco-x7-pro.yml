@@ -25,7 +25,19 @@ jobs:
         run: |
           SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | head -n 1)
           test -n "$SDKMANAGER"
-          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools' 'ndk;27.2.12479018' 'cmake;3.22.1'
+          # SDK mirrors occasionally serve a truncated NDK archive: retry cleanly.
+          for attempt in 1 2 3; do
+            if "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools' 'ndk;27.2.12479018' 'cmake;3.22.1'; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            echo "SDK download attempt $attempt failed; clearing incomplete NDK and retrying"
+            if [ -d "$ANDROID_HOME/ndk/27.2.12479018" ] && [ ! -f "$ANDROID_HOME/ndk/27.2.12479018/source.properties" ]; then
+              rm -rf "$ANDROID_HOME/ndk/27.2.12479018"
+            fi
+            sleep 4
+          done
+          test -f "$ANDROID_HOME/ndk/27.2.12479018/source.properties"
       - name: Build dependencies
         run: |
           sudo apt-get update
