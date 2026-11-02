@@ -1,8 +1,8 @@
-name: Build POCO X7 Pro Mali Foliage FP16 Diagnostic APK
+name: Build POCO X7 Pro Mali FP16 + Fishing Water Fix ARM64 APK
 on:
   push:
     branches:
-      - poco-x7-pro-mali-foliage-fp16
+      - poco-x7-pro-mali-fp16-fishing-water-fix
   workflow_dispatch:
 permissions:
   contents: read
@@ -44,6 +44,8 @@ jobs:
           git diff --check
       - name: Settings regression tests
         run: python3 tools/test_settings.py
+      - name: Fishing lake renderer regression test
+        run: python3 tools/test_fishing_water_fix.py
       - name: Compile native dependencies
         run: |
           export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}"
@@ -58,9 +60,9 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew --no-daemon --stacktrace assembleRelease -PonDeviceBuild=true -PlasMaliFoliageId -PlasVersionName=1.2.0-mali-fp16-test -PlasVersionCode=1203
+          ./gradlew --no-daemon --stacktrace assembleRelease -PonDeviceBuild=true -PlasMaliFp16WaterId -PlasVersionName=1.2.0-mali-fp16-water-fix -PlasVersionCode=1207
           mkdir -p ../output
-          cp app/build/outputs/apk/release/app-release.apk ../output/LASRecomp_Poco_X7_Pro_1.2.0_MALI_FP16_TEST.apk
+          cp app/build/outputs/apk/release/app-release.apk ../output/LASRecomp_Poco_X7_Pro_1.2.0_MALI_FP16_WATER_FIX.apk
       - name: Verify APK signature and 16 KiB zip alignment
         run: |
           BT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}/build-tools/36.0.0"
@@ -70,7 +72,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LASRecomp-Poco-X7-Pro-Mali-Foliage-FP16-APK
+          name: LASRecomp-Poco-X7-Pro-Mali-FP16-Water-Fix-ARM64-APK
           path: output/
           if-no-files-found: error
           retention-days: 14
