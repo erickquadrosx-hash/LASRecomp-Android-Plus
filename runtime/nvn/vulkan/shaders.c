@@ -21,12 +21,28 @@ static shaderc_shader_kind kind_of(int stage) {
 // SPIR-V disk cache: cache/spirv/<hash of stage + source>.spv, so a known shader costs a file read instead of a
 // GLSL compile (the driver's pipeline cache only covers the step after this one).
 // SPIR-V post-processing choices (tests): LARECOMP_VK_NO_CONTRACT=0 leaves vertex shaders' arithmetic to the driver,
-// LARECOMP_VK_OPT_FS=1 optimises fragment shaders (spirv-opt). Part of the cache key.
+// LARECOMP_VK_OPT_FS=0/1 controls fragment and compute shader optimisation.
+// On Android ARM Mali, enable it by default; leave vertex shaders unchanged to
+// preserve bit-exact depth values between the pre-pass and colour pass (foliage).
+// The optimisation flag is part of the SPIR-V disk-cache key.
 static int spv_flags(void) {
     static int f = -1;
     if (f < 0) {
         const char *nc = getenv("LARECOMP_VK_NO_CONTRACT"), *of = getenv("LARECOMP_VK_OPT_FS");
-        f = (nc && !atoi(nc) ? 1 : 0) | (of && atoi(of) ? 2 : 0);
+        bool opt_fs = of && *of ? atoi(of) != 0 : false;
+#ifdef __ANDROID__
+        if (!of || !*of) opt_fs = g_vk.props.vendorID == 0x13B5;  // ARM Mali GPUs
+#endif
+        f = (nc && !atoi(nc) ? 1 : 0) | (opt_fs ? 2 : 0);
+        LOG("[vk] fragment / compute shader optimisation %s (%s)\n",
+            opt_fs ? "enabled" : "disabled",
+            of && *of ? "LARECOMP_VK_OPT_FS override" :
+#ifdef __ANDROID__
+            g_vk.props.vendorID == 0x13B5 ? "Mali default" : "default"
+#else
+            "default"
+#endif
+        );
     }
     return f;
 }
