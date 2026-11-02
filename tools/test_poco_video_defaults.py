@@ -23,7 +23,7 @@ assert "g_default_res_mode = 1;" in settings
 assert "if (g_settings.upscaler_auto) g_settings.upscaler = g_default_upscaler;" in settings
 assert "if (g_settings.res_auto) g_settings.res_mode = g_default_res_mode;" in settings
 assert 'else if (!strcmp(key, "frame_rate")) g_settings.frame_rate' in settings
-assert 'else if (!strcmp(key, "aspect")) g_settings.aspect' in settings
+assert 'if (!strcmp(key, "aspect")) g_settings.aspect' in settings
 assert 'else if (!strcmp(key, "fullscreen")) g_settings.fullscreen' in settings
 hooks = Path("runtime/hle/hooks.c").read_text()
 assert "if (GA_AT(hook_field[i]) == site)" in hooks, "Shield freeze hook fix missing"
