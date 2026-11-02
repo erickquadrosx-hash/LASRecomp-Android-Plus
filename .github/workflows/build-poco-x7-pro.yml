@@ -1,8 +1,8 @@
-name: Build POCO X7 Pro Mali Performance Experiment ARM64
+name: Build POCO X7 Pro Mali Split Barriers Performance V2
 on:
   push:
     branches:
-      - poco-x7-pro-perf-v1.3-experimental
+      - poco-x7-pro-perf-v2-split-barriers
   workflow_dispatch:
 permissions:
   contents: read
@@ -59,6 +59,7 @@ jobs:
           python3 tools/test_settings.py
           python3 tools/test_poco_video_defaults.py
           python3 tools/test_poco_mali_shader_opt.py
+          python3 tools/test_poco_mali_barrier.py
       - name: Compile native dependencies
         run: |
           export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}"
@@ -73,9 +74,9 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew --no-daemon --stacktrace assembleRelease -PonDeviceBuild=true -PlasPocoPerfId -PlasVersionName=1.2.0-poco-perf-experimental1 -PlasVersionCode=1301
+          ./gradlew --no-daemon --stacktrace assembleRelease -PonDeviceBuild=true -PlasPocoPerf2Id -PlasVersionName=1.2.0-poco-perf-experimental2 -PlasVersionCode=1302
           mkdir -p ../output
-          cp app/build/outputs/apk/release/app-release.apk ../output/LASRecomp_Poco_X7_Pro_1.2.0_PERF_EXPERIMENTAL.apk
+          cp app/build/outputs/apk/release/app-release.apk ../output/LASRecomp_Poco_X7_Pro_1.2.0_PERF_V2.apk
       - name: Verify APK signature and 16 KiB zip alignment
         run: |
           BT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}/build-tools/36.0.0"
@@ -85,7 +86,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LASRecomp-Poco-X7-Pro-Performance-Experimental-APK
+          name: LASRecomp-Poco-X7-Pro-Performance-V2-APK
           path: output/
           if-no-files-found: error
           retention-days: 14
