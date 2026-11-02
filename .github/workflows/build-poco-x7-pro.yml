@@ -1,8 +1,8 @@
-name: Build POCO X7 Pro Android ARM64 APK
+name: Build POCO X7 Pro Shield Freeze Fix ARM64 APK
 on:
   push:
     branches:
-      - poco-x7-pro-arm64-compat
+      - poco-x7-pro-shield-freeze-fix
   workflow_dispatch:
 permissions:
   contents: read
@@ -30,6 +30,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential git curl unzip zip xz-utils cmake ninja-build clang lld python3 python3-pip nasm yasm perl patch autoconf automake libtool pkg-config
+      - name: Regression test Android hook dispatch and frame-job synchronization
+        run: |
+          clang -std=gnu11 -O1 -ffunction-sections -fdata-sections -Wl,--gc-sections tools/test_android_framejob.c -o /tmp/test_hooks_host
+          /tmp/test_hooks_host
+          clang -std=gnu11 -O1 -ffunction-sections -fdata-sections -Wl,--gc-sections -D__ANDROID__ tools/test_android_framejob.c -o /tmp/test_hooks_android
+          /tmp/test_hooks_android
       - name: Apply POCO compatibility edits
         run: |
           python3 tools/android/apply_poco_x7_pro.py
@@ -50,9 +56,9 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew --no-daemon --stacktrace assembleRelease -PonDeviceBuild=true -PlasTestId -PlasVersionName=1.2.0-poco-x7-pro -PlasVersionCode=1201
+          ./gradlew --no-daemon --stacktrace assembleRelease -PonDeviceBuild=true -PlasShieldFixId -PlasVersionName=1.2.0-poco-shield-fix -PlasVersionCode=1202
           mkdir -p ../output
-          cp app/build/outputs/apk/release/app-release.apk ../output/LASRecomp_Poco_X7_Pro_1.2.0_TEST.apk
+          cp app/build/outputs/apk/release/app-release.apk ../output/LASRecomp_Poco_X7_Pro_1.2.0_SHIELD_FIX.apk
       - name: Verify APK signature and 16 KiB zip alignment
         run: |
           BT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}/build-tools/36.0.0"
@@ -62,7 +68,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LASRecomp-Poco-X7-Pro-ARM64-APK
+          name: LASRecomp-Poco-X7-Pro-Shield-Fix-ARM64-APK
           path: output/
           if-no-files-found: error
           retention-days: 14
