@@ -26,10 +26,10 @@ jobs:
             libxcb-sync-dev libxcb-shm0-dev libxcb-xfixes0-dev \
             libxcb-xkb-dev libxshmfence-dev libwayland-dev libzstd-dev \
             libexpat1-dev libxml2-dev flex bison
-      - name: Install Android NDK package manager
-        uses: android-actions/setup-android@v3
-      - name: Install pinned Android NDK
-        run: sdkmanager --install 'ndk;28.2.13676358'
+      - name: Use runner Android SDK and install NDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install 'ndk;28.2.13676358'
       - name: Get upstream pinned PanVK 26.3.1 source
         run: |
           git clone --filter=blob:none --branch panvk-kbase-v26.3.1 --depth=1 \
