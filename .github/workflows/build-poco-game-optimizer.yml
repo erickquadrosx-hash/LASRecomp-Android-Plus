@@ -1,0 +1,40 @@
+name: Compilar POCO Game Optimizer APK
+on:
+  push:
+    branches: ['build/poco-game-optimizer-v1']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Extrair projeto Android isolado
+        run: |
+          mkdir -p optimizer-app
+          tar -xJf poco-game-optimizer/android-source.tar.xz -C optimizer-app
+          test -f optimizer-app/settings.gradle
+      - name: Preparar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Preparar Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Instalar SDK Android 35
+        run: sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Preparar Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Compilar APK debug
+        run: gradle --no-daemon -p optimizer-app :app:assembleDebug
+      - name: Publicar APK para download
+        uses: actions/upload-artifact@v4
+        with:
+          name: POCO_Game_Optimizer_v1_debug_APK
+          path: optimizer-app/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
+          if-no-files-found: error
