@@ -25,7 +25,9 @@ android {
     defaultConfig {
         applicationId 'com.lasrecomp.android'
         // -PlasTestId: installed beside the app (its own data folder; for testing on a phone that has it)
-        if (project.hasProperty('lasTestId')) applicationIdSuffix '.test'
+        // Separate experimental installation: keeps the previously working .test app and its saves intact.
+        if (project.hasProperty('lasShieldFixId')) applicationIdSuffix '.shieldfix'
+        else if (project.hasProperty('lasTestId')) applicationIdSuffix '.test'
         minSdk 30          // Android 11: Vulkan 1.1+, AAudio, MAP_FIXED_NOREPLACE kernels
         targetSdk 36
         versionCode((project.findProperty('lasVersionCode') ?: '1') as int)
