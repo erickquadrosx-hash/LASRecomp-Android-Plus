@@ -92,7 +92,7 @@ void rt_frame_job_kickoff(uint64_t owner) {
     // between them would otherwise clear the delegate of the J being rebuilt (the kick-off sets it non-zero).
     // A worker may have written the base vtable but not yet cleared the delegate.
     // Never rebuild J until both writes complete: the late clear could otherwise
-    // erase the next frame\'s new delegate and leave its owner waiting forever.
+    // erase the next frame's new delegate and leave its owner waiting forever.
     while (!(finished = rd64(job) == GA(DELEGATE_JOB_VTABLE_BASE) && !rd64(job + 0x10)) &&
            (waited = plat_now_ns() - t0) < 1000000000ull)
         plat_sleep_until_ns(plat_now_ns() + 20000);
