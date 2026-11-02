@@ -1,8 +1,8 @@
-name: Build POCO X7 Pro Mali Split Barriers Performance V2
+name: Build POCO X7 Pro Mali Graphics Fix Safe Sync
 on:
   push:
     branches:
-      - poco-x7-pro-perf-v2-split-barriers
+      - poco-x7-pro-perf-v2-graphics-fix
   workflow_dispatch:
 permissions:
   contents: read
@@ -74,9 +74,9 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew --no-daemon --stacktrace assembleRelease -PonDeviceBuild=true -PlasPocoPerf2Id -PlasVersionName=1.2.0-poco-perf-experimental2 -PlasVersionCode=1302
+          ./gradlew --no-daemon --stacktrace assembleRelease -PonDeviceBuild=true -PlasPocoGraphicsFixId -PlasVersionName=1.2.0-poco-graphics-fix -PlasVersionCode=1303
           mkdir -p ../output
-          cp app/build/outputs/apk/release/app-release.apk ../output/LASRecomp_Poco_X7_Pro_1.2.0_PERF_V2.apk
+          cp app/build/outputs/apk/release/app-release.apk ../output/LASRecomp_Poco_X7_Pro_1.2.0_GRAPHICS_FIX.apk
       - name: Verify APK signature and 16 KiB zip alignment
         run: |
           BT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}/build-tools/36.0.0"
@@ -86,7 +86,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LASRecomp-Poco-X7-Pro-Performance-V2-APK
+          name: LASRecomp-Poco-X7-Pro-Graphics-Fix-APK
           path: output/
           if-no-files-found: error
           retention-days: 14
