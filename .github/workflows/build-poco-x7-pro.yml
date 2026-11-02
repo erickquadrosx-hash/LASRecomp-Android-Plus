@@ -1,8 +1,8 @@
-name: Build POCO X7 Pro Shield Freeze Fix ARM64 APK
+name: Build POCO X7 Pro Fishing Water Fix ARM64 APK
 on:
   push:
     branches:
-      - poco-x7-pro-shield-freeze-fix
+      - poco-x7-pro-shield-fishing-water-fix
   workflow_dispatch:
 permissions:
   contents: read
@@ -42,6 +42,8 @@ jobs:
           git diff --check
       - name: Settings regression tests
         run: python3 tools/test_settings.py
+      - name: Fishing lake renderer regression test
+        run: python3 tools/test_fishing_water_fix.py
       - name: Compile native dependencies
         run: |
           export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}"
@@ -56,9 +58,9 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew --no-daemon --stacktrace assembleRelease -PonDeviceBuild=true -PlasShieldFixId -PlasVersionName=1.2.0-poco-shield-fix -PlasVersionCode=1202
+          ./gradlew --no-daemon --stacktrace assembleRelease -PonDeviceBuild=true -PlasFishingFixId -PlasVersionName=1.2.0-poco-fishing-water-fix -PlasVersionCode=1206
           mkdir -p ../output
-          cp app/build/outputs/apk/release/app-release.apk ../output/LASRecomp_Poco_X7_Pro_1.2.0_SHIELD_FIX.apk
+          cp app/build/outputs/apk/release/app-release.apk ../output/LASRecomp_Poco_X7_Pro_1.2.0_FISHING_WATER_FIX.apk
       - name: Verify APK signature and 16 KiB zip alignment
         run: |
           BT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}/build-tools/36.0.0"
@@ -68,7 +70,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LASRecomp-Poco-X7-Pro-Shield-Fix-ARM64-APK
+          name: LASRecomp-Poco-X7-Pro-Fishing-Water-Fix-ARM64-APK
           path: output/
           if-no-files-found: error
           retention-days: 14
