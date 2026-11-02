@@ -80,13 +80,20 @@ void rt_frame_job_kickoff(uint64_t owner) {
     }
     uint64_t job = owner + 0xc8;
     if (off || !owner || !(__atomic_load_n((uint8_t *)(uintptr_t)(owner + 0x1d8), __ATOMIC_ACQUIRE) & 1) ||
-        rd64(job) != GA(DELEGATE_JOB_VTABLE_LIVE) || !frame_job(job))
+        !frame_job(job))
         return;  // (the usual case: no run of J is still finishing)
+    uint64_t vt = rd64(job);
+    if (vt != GA(DELEGATE_JOB_VTABLE_LIVE) &&
+        (vt != GA(DELEGATE_JOB_VTABLE_BASE) || !rd64(job + 0x10)))
+        return;  // job fully finished or of another class
     uint64_t t0 = plat_now_ns(), waited = 0;
     bool finished;
     // The finish (slot +0x00) is two stores: the base vtable, then [J+0x10] = 0. Wait for both - a worker preempted
     // between them would otherwise clear the delegate of the J being rebuilt (the kick-off sets it non-zero).
-    while (!(finished = rd64(job) != GA(DELEGATE_JOB_VTABLE_LIVE) && !rd64(job + 0x10)) &&
+    // A worker may have written the base vtable but not yet cleared the delegate.
+    // Never rebuild J until both writes complete: the late clear could otherwise
+    // erase the next frame\'s new delegate and leave its owner waiting forever.
+    while (!(finished = rd64(job) == GA(DELEGATE_JOB_VTABLE_BASE) && !rd64(job + 0x10)) &&
            (waited = plat_now_ns() - t0) < 1000000000ull)
         plat_sleep_until_ns(plat_now_ns() + 20000);
     static int logged;
