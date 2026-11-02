@@ -15,10 +15,10 @@ start = src.index("static int split_barrier = -1;")
 end = src.index("static void ring_retire(void);", start)
 body = src[start:end]
 tests = [
-    ("opt-out environment variable", '"LARECOMP_VK_SPLIT_BARRIER"' in body),
-    ("ARM GPU vendor detection", "g_vk.props.vendorID == 0x13B5" in body),
-    ("Android-specific default", "#ifdef __ANDROID__" in body),
-    ("other targets default disabled", "split_barrier = e && *e ? atoi(e) != 0 : 0;" in body),
+    ("opt-in environment variable", '"LARECOMP_VK_SPLIT_BARRIER"' in body),
+    ("safest original barriers by default", "split_barrier = e && *e && atoi(e) != 0;" in body),
+    ("no implicit Mali vendor enable", "g_vk.props.vendorID == 0x13B5" not in body),
+    ("explicit opt-in only", "split_barrier = e && *e && atoi(e) != 0;" in body),
     ("fragment stage for per-pixel shaders", "VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT" in body),
     ("depth-attachment stages", "VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT" in body and "VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT" in body),
     ("colour output stage", "VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT" in body),
@@ -45,5 +45,5 @@ check("GA_AT(hook_field[i]) == site" in hooks, "shield freeze hook regression")
 delegate = Path("runtime/hle/delegate_null.c").read_text(encoding="utf8")
 check("vt != GA(DELEGATE_JOB_VTABLE_BASE)" in delegate, "shield freeze frame-job regression")
 build = Path("android/app/build.gradle").read_text(encoding="utf8")
-check("applicationIdSuffix '.pocoperf2'" in build, "previous APK install is not isolated")
-print(f"{len(tests) + 10} Mali barrier / approved-profile / rollback checks passed")
+check("applicationIdSuffix '.pocofix'" in build, "new fixed APK install is not isolated")
+print(f"{len(tests) + 10} Mali safe full barriers / approved-profile / rollback checks passed")
