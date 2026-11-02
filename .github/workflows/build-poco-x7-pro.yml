@@ -1,0 +1,64 @@
+name: Build POCO X7 Pro Android ARM64 APK
+on:
+  push:
+    branches:
+      - poco-x7-pro-arm64-compat
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install SDK NDK
+        run: |
+          sdkmanager --install 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools' 'ndk;27.2.12479018' 'cmake;3.22.1'
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential git curl unzip zip xz-utils cmake ninja-build clang lld python3 python3-pip nasm yasm perl patch autoconf automake libtool pkg-config
+      - name: Apply POCO compatibility edits
+        run: |
+          python3 tools/android/apply_poco_x7_pro.py
+          git diff --check
+      - name: Settings regression tests
+        run: python3 tools/test_settings.py
+      - name: Compile native dependencies
+        run: |
+          export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}"
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+          bash tools/android/build_deps.sh
+      - name: Build in-app ARM64 compiler kit
+        run: |
+          export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}"
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+          bash tools/android/ondevice/build_all.sh
+      - name: Compile Android ARM64 test APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace assembleRelease -PonDeviceBuild=true -PlasTestId -PlasVersionName=1.2.0-poco-x7-pro -PlasVersionCode=1201
+          mkdir -p ../output
+          cp app/build/outputs/apk/release/app-release.apk ../output/LASRecomp_Poco_X7_Pro_1.2.0_TEST.apk
+      - name: Verify APK signature and 16 KiB zip alignment
+        run: |
+          BT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}/build-tools/36.0.0"
+          "$BT/apksigner" verify --verbose output/*.apk
+          "$BT/zipalign" -c -P 16 -v 4 output/*.apk
+          sha256sum output/*.apk > output/SHA256SUMS.txt
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: LASRecomp-Poco-X7-Pro-ARM64-APK
+          path: output/
+          if-no-files-found: error
+          retention-days: 14
