@@ -1,0 +1,68 @@
+name: PanVK G720 AHB driver (experimental ARM64)
+on:
+  push:
+    branches:
+      - experimental-panvk-g720-ahb-20261102
+    paths:
+      - 'panvk-g720/**'
+      - '.github/workflows/panvk-g720-ahb.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux Mesa build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git build-essential cmake ninja-build meson pkg-config \
+            python3 python3-pip python3-mako python3-yaml \
+            llvm-dev clang libclang-dev libdrm-dev libelf-dev libudev-dev \
+            libx11-dev libxcb1-dev libx11-xcb-dev libxcb-randr0-dev \
+            libxcb-present-dev libxcb-dri3-dev libxcb-dri2-0-dev \
+            libxcb-sync-dev libxcb-shm0-dev libxcb-xfixes0-dev \
+            libxcb-xkb-dev libxshmfence-dev libwayland-dev libzstd-dev \
+            libexpat1-dev libxml2-dev flex bison
+      - name: Install Android NDK package manager
+        uses: android-actions/setup-android@v3
+      - name: Install pinned Android NDK
+        run: sdkmanager --install 'ndk;28.2.13676358'
+      - name: Get upstream pinned PanVK 26.3.1 source
+        run: |
+          git clone --filter=blob:none --branch panvk-kbase-v26.3.1 --depth=1 \
+            https://github.com/zenithblue-oss/panvk-kbase-android.git panvk-upstream
+          git -C panvk-upstream log -1 --format='%H %s'
+      - name: Fetch exact Mesa sources and apply PanVK patch series
+        working-directory: panvk-upstream
+        run: |
+          git config --global user.name "PanVK G720 CI"
+          git config --global user.email "panvk-ci@users.noreply.github.com"
+          ./scripts/fetch-mesa.sh
+          ./scripts/prepare-rc5-tree.sh --mesa "$PWD/work/mesa" --csf-max 233 --wip-max 0175
+      - name: Guarded AHB and WSI fix
+        run: |
+          python3 panvk-g720/scripts/apply_fix.py panvk-upstream/work/mesa
+          git -C panvk-upstream/work/mesa diff --check
+          git -C panvk-upstream/work/mesa diff --stat
+      - name: Build actual Android aarch64 Vulkan library
+        working-directory: panvk-upstream
+        env:
+          PANVK_JOBS: '4'
+        run: |
+          ./scripts/build-android.sh --profile g615-v11-csf --api 29 \
+            --ndk "$ANDROID_HOME/ndk/28.2.13676358"
+      - name: Verify real ELF and build LAS Recomp ZIP
+        run: |
+          python3 panvk-g720/scripts/package_driver.py \
+            panvk-upstream/dist/android-g615-v11-csf/libvulkan_panfrost.so \
+            PanVK_G720_AHB_Experimental_Android_ARM64.zip
+          unzip -t PanVK_G720_AHB_Experimental_Android_ARM64.zip
+          sha256sum PanVK_G720_AHB_Experimental_Android_ARM64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PanVK_G720_AHB_Experimental_Android_ARM64
+          path: PanVK_G720_AHB_Experimental_Android_ARM64.zip
+          retention-days: 14
