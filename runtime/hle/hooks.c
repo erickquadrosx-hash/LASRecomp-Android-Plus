@@ -63,7 +63,9 @@ static const size_t hook_field[] = {
 
 static int hook_id(uint64_t site) {
     for (size_t i = 0; i < sizeof hook_field / sizeof hook_field[0]; i++)
-        if (*(const uint64_t *)((const char *)g_ga + hook_field[i]) == site) return (int)i;
+        // The generated code passes a shifted runtime address on Android.
+        // GA_AT normalizes the unshifted Switch table entry for either platform.
+        if (GA_AT(hook_field[i]) == site) return (int)i;
     return -1;
 }
 
