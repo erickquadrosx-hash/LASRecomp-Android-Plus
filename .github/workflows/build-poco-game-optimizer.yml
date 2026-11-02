@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   android:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,10 +21,16 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Preparar Android SDK
-        uses: android-actions/setup-android@v3
-      - name: Instalar SDK Android 35
-        run: sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Instalar Android SDK 35 no SDK do runner
+        shell: bash
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          test -d "$ANDROID_HOME"
+          SDK_MANAGER="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -1)"
+          test -n "$SDK_MANAGER"
+          echo "sdkmanager: $SDK_MANAGER"
+          yes | "$SDK_MANAGER" --sdk_root="$ANDROID_HOME" --licenses >/dev/null || true
+          "$SDK_MANAGER" --sdk_root="$ANDROID_HOME" --install 'platforms;android-35' 'build-tools;35.0.0'
       - name: Preparar Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
