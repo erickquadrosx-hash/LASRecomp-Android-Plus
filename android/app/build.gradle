@@ -26,7 +26,9 @@ android {
         applicationId 'com.lasrecomp.android'
         // -PlasTestId: installed beside the app (its own data folder; for testing on a phone that has it)
         // Separate experimental installation: keeps the previously working .test app and its saves intact.
-        if (project.hasProperty('lasMaliFoliageId')) applicationIdSuffix '.malifoliage'
+        // POCO X7 Pro default-profile build: standalone install, preserves prior test apps and their saves.
+        if (project.hasProperty('lasPocoStableId')) applicationIdSuffix '.pocostable'
+        else if (project.hasProperty('lasMaliFoliageId')) applicationIdSuffix '.malifoliage'
         else if (project.hasProperty('lasShieldFixId')) applicationIdSuffix '.shieldfix'
         else if (project.hasProperty('lasTestId')) applicationIdSuffix '.test'
         minSdk 30          // Android 11: Vulkan 1.1+, AAudio, MAP_FIXED_NOREPLACE kernels
