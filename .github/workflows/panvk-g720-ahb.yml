@@ -28,8 +28,10 @@ jobs:
             libexpat1-dev libxml2-dev flex bison
       - name: Use runner Android SDK and install NDK
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --install 'ndk;28.2.13676358'
+          SDKMANAGER="$(find /usr/local/lib/android/sdk/cmdline-tools -type f -name sdkmanager | sort -V | tail -n1)"
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install 'ndk;28.2.13676358'
       - name: Get upstream pinned PanVK 26.3.1 source
         run: |
           git clone --filter=blob:none --branch panvk-kbase-v26.3.1 --depth=1 \
