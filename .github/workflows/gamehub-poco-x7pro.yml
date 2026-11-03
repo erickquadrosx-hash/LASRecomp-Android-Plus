@@ -42,7 +42,7 @@ jobs:
           echo "$EXPECTED_SHA  /tmp/gamehub_base.apk" | sha256sum -c -
       - name: Aplicar ajuste de bibliotecas nativas
         if: ${{ inputs.base_apk_url != '' }}
-        run: python gamehub-poco-x7pro/repack.py /tmp/gamehub_base.apk /tmp/gamehub_unsigned.apk
+        run: python gamehub-poco-x7pro/repack_v2.py /tmp/gamehub_base.apk /tmp/gamehub_unsigned.apk --mode native16k
       - name: Preparar ferramentas de assinatura
         if: ${{ inputs.base_apk_url != '' }}
         shell: bash
