@@ -1,0 +1,47 @@
+name: BPD POCO X7 Pro - Launcher Android
+on:
+  push:
+    branches: [experiment/bpd-poco-x7-pro-launcher]
+    paths:
+      - 'projects/bpd-poco-launcher/**'
+      - '.github/workflows/bpd-poco-launcher.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android:
+    name: Compilar launcher Android
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Localizar Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          SDKMGR=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)
+          test -x "$SDKMGR"
+          echo "$(dirname "$SDKMGR")" >> "$GITHUB_PATH"
+      - name: Instalar SDK 35
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Compilar APK de debug
+        run: gradle -p projects/bpd-poco-launcher --no-daemon --stacktrace assembleDebug
+      - name: Validar arquivo APK
+        run: |
+          test -s projects/bpd-poco-launcher/app/build/outputs/apk/debug/app-debug.apk
+          unzip -t projects/bpd-poco-launcher/app/build/outputs/apk/debug/app-debug.apk | tail -n 2
+      - name: Disponibilizar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BPD-POCO-X7-Pro-Launcher-v0.2-debug
+          path: projects/bpd-poco-launcher/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 21
