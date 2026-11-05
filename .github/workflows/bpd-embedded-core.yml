@@ -1,0 +1,97 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: BPD POCO Integrated ARM64 Emulator
+on:
+  push:
+    branches:
+      - experiment/bpd-poco-x7pro-embedded-emulator-v04
+    paths:
+      - "projects/bpd-embedded-engine/**"
+      - ".github/workflows/bpd-embedded-core.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-engine:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    env:
+      NDK_VERSION: "28.2.13676358"
+      CMAKE_VERSION: "3.31.6"
+      UPSTREAM_SHA: "891be721eea35e0c075ed0d99e6b4f48a0a7843e"
+    steps:
+      - name: Checkout BPD overlay
+        uses: actions/checkout@v4
+      - name: Free disk space for native build
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /usr/local/lib/android/sdk/ndk /usr/local/lib/android/sdk/emulator \
+            /usr/local/lib/android/sdk/system-images "$AGENT_TOOLSDIRECTORY" || true
+          df -h /
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Clone pinned GPL emulation core
+        run: |
+          git clone --filter=blob:none --depth 1 --recurse-submodules \
+            https://github.com/Ghael-V/Lemon-Project.git lemon-src
+          cd lemon-src
+          git fetch --depth 1 origin "$UPSTREAM_SHA"
+          git checkout --detach "$UPSTREAM_SHA"
+          git submodule update --init --recursive --depth 1
+          test "$(git rev-parse HEAD)" = "$UPSTREAM_SHA"
+      - name: Integrate BPD POCO launcher into Lemon Lite
+        run: python3 projects/bpd-embedded-engine/apply_overlay.py
+      - name: Install Android SDK NDK and CMake
+        run: |
+          SDKMGR=$(find "$ANDROID_SDK_ROOT/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)
+          test -x "$SDKMGR"
+          yes | "$SDKMGR" --licenses > /dev/null || true
+          "$SDKMGR" "platforms;android-36" "ndk;$NDK_VERSION" "cmake;$CMAKE_VERSION"
+      - name: Install C++ build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends glslang-tools ccache
+      - name: Restore Gradle dependencies cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: bpd-embedded-gradle-v1-ubuntu
+      - name: Restore C++ dependencies cache
+        uses: actions/cache@v4
+        with:
+          path: lemon-src/.cache/cpm
+          key: bpd-embedded-cpm-v1-ubuntu
+      - name: Build Lemon Lite Android ARM64 with BPD launcher
+        run: |
+          export ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/$NDK_VERSION"
+          export CCACHE_DIR="$HOME/.cache/ccache"
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size=4G
+          cd lemon-src
+          chmod +x .ci/android/build.sh
+          CCACHE=true .ci/android/build.sh -t lite -b Release
+      - name: Verify APK and native emulator libraries
+        run: |
+          ls -lah lemon-src/artifacts/
+          APK=$(find lemon-src/artifacts -name '*.apk' -type f | head -n 1)
+          test -n "$APK"
+          test -s "$APK"
+          unzip -l "$APK" | grep -E 'lib/arm64-v8a/.*\.so'
+          mkdir -p output
+          cp "$APK" output/BPD_POCO_Integrated_Core_v0.4_ARM64.apk
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BPD-POCO-Integrated-Core-v0.4-ARM64
+          path: output/BPD_POCO_Integrated_Core_v0.4_ARM64.apk
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload build diagnostics on failure
+        if: failure()
+        run: |
+          df -h /
+          find lemon-src/artifacts -maxdepth 1 -type f -ls 2>/dev/null || true
