@@ -1,7 +1,7 @@
-name: BPD POCO X7 Pro - Launcher Android
+name: BPD POCO X7 Pro - ROM Launcher
 on:
   push:
-    branches: [experiment/bpd-poco-x7-pro-launcher]
+    branches: [experiment/bpd-poco-x7-pro-roms-v03]
     paths:
       - 'projects/bpd-poco-launcher/**'
       - '.github/workflows/bpd-poco-launcher.yml'
@@ -41,7 +41,7 @@ jobs:
       - name: Disponibilizar APK
         uses: actions/upload-artifact@v4
         with:
-          name: BPD-POCO-X7-Pro-Launcher-v0.2-debug
+          name: BPD-POCO-X7-Pro-ROM-Launcher-v0.3-debug
           path: projects/bpd-poco-launcher/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 21

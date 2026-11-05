@@ -124,6 +124,12 @@ public class MainActivity extends Activity {
         button(play, "Localizar BPD Mobile instalado", false, v -> findGame());
         add(play, text("O jogo roda no aplicativo BPD Mobile instalado separadamente. Este launcher não executa ROMs sozinho.", 12, MUTED, false), 0);
 
+        LinearLayout roms = card(root, "Jogos Pokémon · NSP / XCI");
+        add(roms, text("Biblioteca local de arquivos NSP e XCI, com abertura via emulador Android instalado.", 13, MUTED, false), 5);
+        button(roms, "🎮  ABRIR BIBLIOTECA DE ROMS", true,
+            v -> startActivity(new Intent(this, RomLibraryActivity.class)));
+        add(roms, text("O launcher não contém emulador, ROMs nem chaves. Instale separadamente um emulador compatível.", 12, MUTED, false), 0);
+
         LinearLayout setup = card(root, "Preparar os dados do jogo");
         dataText = text("Nenhum ZIP selecionado.", 13, MUTED, false);
         add(setup, dataText, 5);
@@ -176,7 +182,7 @@ public class MainActivity extends Activity {
         button(other, "Copiar diagnóstico do aparelho", false, v -> copy(deviceInfo()));
         add(other, text(deviceInfo(), 12, MUTED, false), 0);
 
-        add(root, text("Versão 0.2 · Launcher auxiliar independente · Sem arquivos do jogo", 12, MUTED, false), 0);
+        add(root, text("Versão 0.3 · Biblioteca NSP/XCI e BPD Mobile · Sem ROMs embutidas", 12, MUTED, false), 0);
         updateData();
         updateStatus();
     }
