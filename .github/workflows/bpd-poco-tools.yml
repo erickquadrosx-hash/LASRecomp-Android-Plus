@@ -23,7 +23,9 @@ jobs:
       - name: Verificar Android SDK presente no runner
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
-          command -v sdkmanager
+          SDKMGR=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)
+          test -x "$SDKMGR"
+          echo "$(dirname "$SDKMGR")" >> "$GITHUB_PATH"
       - name: SDK 35
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - name: Preparar Gradle
