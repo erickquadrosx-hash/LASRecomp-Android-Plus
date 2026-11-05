@@ -1,0 +1,41 @@
+name: BPD POCO X7 Pro - APK auxiliar
+on:
+  push:
+    branches: [experiment/bpd-poco-x7-pro-companion]
+    paths:
+      - 'projects/bpd-poco-app/**'
+      - '.github/workflows/bpd-poco-tools.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android:
+    name: Compilar BPD POCO Tools APK
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Baixar codigo
+        uses: actions/checkout@v4
+      - name: Instalar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Preparar Android SDK
+        uses: android-actions/setup-android@v3
+      - name: SDK 35
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Preparar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Compilar APK de diagnostico e launcher
+        run: gradle -p projects/bpd-poco-app --no-daemon --stacktrace assembleDebug
+      - name: Verificar APK
+        run: test -s projects/bpd-poco-app/app/build/outputs/apk/debug/app-debug.apk
+      - name: Publicar artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: BPD-POCO-X7-Pro-Tools-v0.1-debug
+          path: projects/bpd-poco-app/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
