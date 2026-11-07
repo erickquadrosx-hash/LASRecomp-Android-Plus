@@ -16,12 +16,12 @@ NEW_METHOD = r'''
                 catch (java.io.IOException e) { toast("Backup failed: " + e.getMessage()); return; }
             }
         }
-        String settings = "; POCO X7 Pro V2 30 FPS stable profile\\r\\n"
-            + "renderer = vulkan\\r\\nvsync = mailbox\\r\\ngpu = auto\\r\\nconsole_mode = handheld\\r\\n"
-            + "resolution_scale = 0.85\\r\\nframe_rate = 30\\r\\nfps_cap = 60\\r\\nboost = auto\\r\\n"
-            + "anti_aliasing = off\\r\\nsharpening = 0\\r\\nanisotropic_filtering = game\\r\\n"
-            + "shader_wait = hold\\r\\nframe_time_overlay = off\\r\\ndriver = system\\r\\n"
-            + "diagnostics = off\\r\\nprofile = custom\\r\\nfps_counter = on\\r\\n";
+        String settings = "; POCO X7 Pro V2 30 FPS stable profile\r\n"
+            + "renderer = vulkan\r\nvsync = mailbox\r\ngpu = auto\r\nconsole_mode = handheld\r\n"
+            + "resolution_scale = 0.85\r\nframe_rate = 30\r\nfps_cap = 60\r\nboost = auto\r\n"
+            + "anti_aliasing = off\r\nsharpening = 0\r\nanisotropic_filtering = game\r\n"
+            + "shader_wait = hold\r\nframe_time_overlay = off\r\ndriver = system\r\n"
+            + "diagnostics = off\r\nprofile = custom\r\nfps_counter = on\r\n";
         try (FileOutputStream out = new FileOutputStream(graphics)) {
             out.write(settings.getBytes(StandardCharsets.UTF_8));
         } catch (java.io.IOException e) { toast("Profile setup failed: " + e.getMessage()); }
