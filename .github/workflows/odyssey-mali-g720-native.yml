@@ -1,7 +1,7 @@
 name: Odyssey Mali G720 - Native pipeline rebuild
 on:
   push:
-    branches: [odyssey-mali-g720-pipeline-20261107]
+    branches: [odyssey-mali-g720-pipeline-20261107, odyssey-x7pro-stability-final-20261107]
     paths:
       - "odyssey-poco-x7-v2/**"
       - "odyssey-build-inputs/**"
@@ -44,6 +44,11 @@ jobs:
           grep -Fq 'Mali exact-key look-ahead enabled' "$SRC/runtime/nvn_vk_m4.c"
           python odyssey-poco-x7-v2/apply_native_v2.py "$SRC"
           python odyssey-poco-x7-v2/apply_native_v2.py "$SRC" --write
+          python -m py_compile odyssey-poco-x7-v2/apply_stability_final.py odyssey-poco-x7-v2/patch_launcher.py
+          python odyssey-poco-x7-v2/apply_stability_final.py "$SRC" --check
+          python odyssey-poco-x7-v2/apply_stability_final.py "$SRC" --write
+          python odyssey-poco-x7-v2/patch_launcher.py "$SRC/android/java/com/mobileodyssey/game/LauncherActivity.java"
+          grep -Fq "installPocoProfile(false)" "$SRC/android/java/com/mobileodyssey/game/LauncherActivity.java"
           git -C "$SRC" diff --check
       - name: Compile public decoder using host Clang
         run: |
@@ -125,7 +130,33 @@ jobs:
           PY
           python odyssey-poco-x7-v2/apply_native_v2.py "$SRC" --write
           python odyssey-poco-x7-v2/apply_mali_pipeline_lookahead.py "$SRC"
+          python odyssey-poco-x7-v2/apply_stability_final.py "$SRC" --write
+          python odyssey-poco-x7-v2/patch_launcher.py "$SRC/android/java/com/mobileodyssey/game/LauncherActivity.java"
           git -C "$SRC" diff --check
+      - name: Recompile 257 ARM64 game objects at -O1 (fallback to originals)
+        shell: bash
+        env:
+          RECOMP_OPT: -O1
+          RECOMP_OPTNONE_LINES: "2500"
+          RECOMP_TIME_LIMIT: "45"
+        run: |
+          set -euo pipefail
+          cd odyssey-poco-x7-v2/upstream
+          test -s build/android/lift/main/funcs.h
+          test "$(find build/android/arm64-v8a/obj/main -name '*.obj' | wc -l)" -ge 200
+          cp -a build/android/arm64-v8a/obj/main "$RUNNER_TEMP/odyssey-obj-original"
+          if timeout 55m python tools/android/build_game.py 4 --abi arm64-v8a --force >"$RUNNER_TEMP/main-optimization.log" 2>&1; then
+            tail -n 35 "$RUNNER_TEMP/main-optimization.log"
+            echo "ODYSSEY_MAIN_OPTIMIZED=1" >> "$GITHUB_ENV"
+            echo "ARM64 game objects rebuilt using -O1 (long functions may fallback to optnone or -O0)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            tail -n 60 "$RUNNER_TEMP/main-optimization.log" || true
+            rm -rf build/android/arm64-v8a/obj/main
+            cp -a "$RUNNER_TEMP/odyssey-obj-original" build/android/arm64-v8a/obj/main
+            echo "ODYSSEY_MAIN_OPTIMIZED=0" >> "$GITHUB_ENV"
+            echo "::warning::Optimized source build failed or timed out. All 257 original game objects restored."
+            echo "Optimization FAILED: original game objects were restored." >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Compile Shaderc, libsmo.so, signed APK
         shell: bash
         env:
@@ -156,6 +187,7 @@ jobs:
           cp build/android/arm64-v8a/lib/libsmo.so "$GITHUB_WORKSPACE/Odyssey_Mali_G720_PipelineFix_libsmo.so"
           cp build/android/odyssey-0.2.apk "$GITHUB_WORKSPACE/Odyssey_Mali_G720_PipelineFix.apk"
           sha256sum "$GITHUB_WORKSPACE"/Odyssey_Mali_G720_PipelineFix.* > "$GITHUB_WORKSPACE/SHA256SUMS.txt"
+          echo "ARM64 main optimization success: $ODYSSEY_MAIN_OPTIMIZED" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: Odyssey_Mali_G720_Native_APK_and_Library
