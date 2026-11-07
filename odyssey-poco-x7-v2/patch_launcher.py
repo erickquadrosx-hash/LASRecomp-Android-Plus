@@ -26,6 +26,16 @@ NEW_METHOD = r'''
             out.write(settings.getBytes(StandardCharsets.UTF_8));
         } catch (java.io.IOException e) { toast("Profile setup failed: " + e.getMessage()); }
     }
+
+    /** Match ADPF performance target to the user's full-speed 30/60 fps choice. */
+    void syncPocoPerfHint() {
+        Ini graphics = new Ini(new File(config, "graphics.ini"));
+        Ini environment = new Ini(new File(config, "env.txt"));
+        String current = environment.get("SMO_PERF_TARGET_US", null);
+        if (current != null && !current.equals("33333") && !current.equals("16667")) return;
+        environment.set("SMO_PERF_TARGET_US",
+                "30".equals(graphics.get("frame_rate", "30")) ? "33333" : "16667");
+    }
 '''
 
 def patch(content):
@@ -43,6 +53,9 @@ def patch(content):
         }));
         c.addView(pocoPreset, new LinearLayout.LayoutParams(-1, dp(52)));'''
     content = content.replace(anchor, replacement, 1)
+    play = 'play.setOnClickListener(v -> startActivity(new Intent(this, GameActivity.class)));'
+    assert content.count(play) == 1
+    content = content.replace(play, 'play.setOnClickListener(v -> { syncPocoPerfHint(); startActivity(new Intent(this, GameActivity.class)); });', 1)
     return content.replace('    void graphicsPage() {', NEW_METHOD + '\n    void graphicsPage() {', 1)
 
 if __name__ == '__main__':
