@@ -1,0 +1,42 @@
+name: Odyssey V2 - Extra glslang ARM64 libraries
+on:
+  push:
+    branches: [odyssey-poco-x7pro-v2-20261107]
+    paths:
+      - ".github/workflows/odyssey-v2-glslang-extras.yml"
+  workflow_dispatch:
+jobs:
+  extra-glslang:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 35
+    steps:
+      - name: Install official NDK 28
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
+      - name: Compile four remaining glslang modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          NDK="$ANDROID_HOME/ndk/28.2.13676358"
+          mkdir -p "$RUNNER_TEMP/glslang-extra"
+          cd "$RUNNER_TEMP/glslang-extra"
+          "$NDK/ndk-build" NDK_PROJECT_PATH=. \
+            APP_BUILD_SCRIPT="$NDK/sources/third_party/shaderc/Android.mk" \
+            APP_STL=c++_static APP_ABI=arm64-v8a APP_PLATFORM=android-30 \
+            NDK_LIBS_OUT=libs -j4 OSDependent OGLCompiler HLSL SPIRV
+          find obj/local/arm64-v8a -maxdepth 1 -name '*.a' -printf '%f %k KiB\n'
+          for lib in libOSDependent.a libOGLCompiler.a libHLSL.a libSPIRV.a; do
+            test -s "obj/local/arm64-v8a/$lib"
+          done
+          mkdir -p "$GITHUB_WORKSPACE/glslang-extra-arm64"
+          cp obj/local/arm64-v8a/libOSDependent.a obj/local/arm64-v8a/libOGLCompiler.a obj/local/arm64-v8a/libHLSL.a obj/local/arm64-v8a/libSPIRV.a "$GITHUB_WORKSPACE/glslang-extra-arm64/"
+          tar -czf "$GITHUB_WORKSPACE/glslang-extra-arm64.tar.gz" -C "$GITHUB_WORKSPACE" glslang-extra-arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Odyssey_V2_Public_glslang_Extra_ARM64_NDK28
+          path: glslang-extra-arm64.tar.gz
+          retention-days: 7
+          if-no-files-found: error
