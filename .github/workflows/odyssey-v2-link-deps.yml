@@ -1,0 +1,75 @@
+name: Odyssey V2 - Export public Android arm64 link dependencies
+on:
+  push:
+    branches: [odyssey-poco-x7pro-v2-20261107]
+    paths:
+      - ".github/workflows/odyssey-v2-link-deps.yml"
+  workflow_dispatch:
+jobs:
+  export-android-toolchain:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 45
+    steps:
+      - name: Install Android NDK and SDK build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKM"
+          yes | "$SDKM" --licenses >/dev/null || true
+          "$SDKM" "ndk;28.2.13676358" "build-tools;35.0.0" "platforms;android-35"
+          test -x "$ANDROID_HOME/ndk/28.2.13676358/ndk-build"
+          test -f "$ANDROID_HOME/platforms/android-35/android.jar"
+      - name: Build public shaderc/glslang/SPIR-V libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          NDK="$ANDROID_HOME/ndk/28.2.13676358"
+          mkdir -p "$RUNNER_TEMP/shaderc-public"
+          cd "$RUNNER_TEMP/shaderc-public"
+          "$NDK/ndk-build" NDK_PROJECT_PATH=. \
+            APP_BUILD_SCRIPT="$NDK/sources/third_party/shaderc/Android.mk" \
+            APP_STL=c++_static APP_ABI=arm64-v8a APP_PLATFORM=android-30 \
+            NDK_LIBS_OUT=libs -j4 shaderc shaderc_util glslang SPIRV-Tools SPIRV-Tools-opt
+          echo "Available static libraries:"
+          ls -lh obj/local/arm64-v8a/*.a
+          test -s obj/local/arm64-v8a/libshaderc.a
+          test -s obj/local/arm64-v8a/libshaderc_util.a
+          test -s obj/local/arm64-v8a/libglslang.a
+          test -s obj/local/arm64-v8a/libSPIRV-Tools.a
+          test -s obj/local/arm64-v8a/libSPIRV-Tools-opt.a
+          tar -czf "$GITHUB_WORKSPACE/shaderc-public-arm64.tar.gz" -C obj/local arm64-v8a
+      - name: Export Android sysroot and public build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          NDK="$ANDROID_HOME/ndk/28.2.13676358"
+          SYSROOT="$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          mkdir -p "$GITHUB_WORKSPACE/sdk-bundle/ndk/sysroot"
+          cp -a "$SYSROOT/usr" "$GITHUB_WORKSPACE/sdk-bundle/ndk/sysroot/"
+          mkdir -p "$GITHUB_WORKSPACE/sdk-bundle/ndk/sources/android"
+          cp -a "$NDK/sources/android/native_app_glue" "$GITHUB_WORKSPACE/sdk-bundle/ndk/sources/android/"
+          mkdir -p "$GITHUB_WORKSPACE/sdk-bundle/ndk/sources/third_party/shaderc/libshaderc"
+          cp -a "$NDK/sources/third_party/shaderc/libshaderc/include" "$GITHUB_WORKSPACE/sdk-bundle/ndk/sources/third_party/shaderc/libshaderc/"
+          mkdir -p "$GITHUB_WORKSPACE/sdk-bundle/sdk/build-tools"
+          cp "$ANDROID_HOME/build-tools/35.0.0/zipalign" "$GITHUB_WORKSPACE/sdk-bundle/sdk/build-tools/"
+          cp "$ANDROID_HOME/build-tools/35.0.0/apksigner" "$GITHUB_WORKSPACE/sdk-bundle/sdk/build-tools/"
+          cp -a "$ANDROID_HOME/build-tools/35.0.0/lib" "$GITHUB_WORKSPACE/sdk-bundle/sdk/build-tools/"
+          mkdir -p "$GITHUB_WORKSPACE/sdk-bundle/sdk/platforms/android-35"
+          cp "$ANDROID_HOME/platforms/android-35/android.jar" "$GITHUB_WORKSPACE/sdk-bundle/sdk/platforms/android-35/"
+          echo 'Public Android SDK/NDK headers, system stub libraries and shaderc; no Nintendo/game files.' > "$GITHUB_WORKSPACE/sdk-bundle/README.txt"
+          du -sh "$GITHUB_WORKSPACE/sdk-bundle"
+          tar -czf "$GITHUB_WORKSPACE/android-public-link-sdk-ndk28.tar.gz" -C "$GITHUB_WORKSPACE" sdk-bundle
+          sha256sum "$GITHUB_WORKSPACE"/*.tar.gz > "$GITHUB_WORKSPACE/public-link-sha256.txt"
+          ls -lh "$GITHUB_WORKSPACE"/*.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Odyssey_V2_Public_Android_NDK_Link_Bundle
+          path: |
+            shaderc-public-arm64.tar.gz
+            android-public-link-sdk-ndk28.tar.gz
+            public-link-sha256.txt
+          retention-days: 7
+          if-no-files-found: error
