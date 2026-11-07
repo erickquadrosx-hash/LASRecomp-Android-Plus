@@ -1,0 +1,69 @@
+name: Odyssey POCO X7 Pro V2 - Experimental APK
+on:
+  push:
+    branches: [odyssey-poco-x7pro-v2-20261107]
+    paths:
+      - "odyssey-poco-x7-v2/**"
+      - ".github/workflows/odyssey-poco-v2-build.yml"
+  workflow_dispatch:
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run unit checks
+        run: |
+          python -m py_compile odyssey-poco-x7-v2/*.py
+          python -m unittest discover -s odyssey-poco-x7-v2 -p 'test_*.py' -v
+      - name: Confirm Android SDK 35 build tools
+        run: |
+          set -euxo pipefail
+          test -f "$ANDROID_HOME/platforms/android-35/android.jar"
+          test -x "$ANDROID_HOME/build-tools/35.0.0/d8"
+          test -x "$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          test -x "$ANDROID_HOME/build-tools/35.0.0/zipalign"
+      - name: Download official B0.2 Java source and APK
+        run: |
+          set -euxo pipefail
+          git clone --quiet --depth 1 --branch B0.2 https://github.com/Deez-coder/SMO-android-port.git upstream
+          curl -fL --retry 3 --output official.apk https://github.com/Deez-coder/SMO-android-port/releases/download/B0.2/odyssey-0.2.apk
+          echo '9a55846029e233521d6e8ff405a3cbc62541aff0859d25ddc5b5af4fbf07b7bb  official.apk' | sha256sum -c -
+      - name: Compile Android launcher Java into DEX
+        run: |
+          set -euxo pipefail
+          python odyssey-poco-x7-v2/patch_launcher.py upstream/android/java/com/mobileodyssey/game/LauncherActivity.java
+          mkdir -p classes dex
+          javac -source 11 -target 11 -encoding UTF-8 -nowarn -classpath "$ANDROID_HOME/platforms/android-35/android.jar" -d classes $(find upstream/android/java -name '*.java' | sort)
+          "$ANDROID_HOME/build-tools/35.0.0/d8" --min-api 30 --lib "$ANDROID_HOME/platforms/android-35/android.jar" --output dex $(find classes -name '*.class' | sort)
+          test -s dex/classes.dex
+      - name: Repackage signed APK
+        run: |
+          set -euxo pipefail
+          python odyssey-poco-x7-v2/repack.py --original official.apk --dex dex/classes.dex --unsigned unsigned.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f -P 16 4 unsigned.apk aligned.apk
+          keytool -genkeypair -noprompt -keystore build.keystore -alias odysseyx7 -storepass android -keypass android -dname 'CN=Odyssey Poco X7 Pro Experimental, O=Personal Build' -validity 3650 -keyalg RSA -keysize 3072
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign --ks build.keystore --ks-key-alias odysseyx7 --ks-pass pass:android --key-pass pass:android --out Odyssey_POCO_X7Pro_V2_Launcher.apk aligned.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs Odyssey_POCO_X7Pro_V2_Launcher.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 Odyssey_POCO_X7Pro_V2_Launcher.apk
+          unzip -t Odyssey_POCO_X7Pro_V2_Launcher.apk | tail -3
+          sha256sum Odyssey_POCO_X7Pro_V2_Launcher.apk > Odyssey_POCO_X7Pro_V2_Launcher.sha256
+          echo 'WARNING: Original B0.2 libsmo.so UNCHANGED; only Java launcher and initial graphical config edited. Native V2 texture/depth fixes NOT INCLUDED. Android device not tested. Different signing key requires backup and uninstall of official APK.' > BUILD_NOTES.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Odyssey_POCO_X7Pro_V2_Experimental_APK
+          path: |
+            Odyssey_POCO_X7Pro_V2_Launcher.apk
+            Odyssey_POCO_X7Pro_V2_Launcher.sha256
+            BUILD_NOTES.txt
+          if-no-files-found: error
+          retention-days: 7
