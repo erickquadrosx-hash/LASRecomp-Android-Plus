@@ -50,6 +50,9 @@ jobs:
         shell: bash
         run: |
           clang -std=gnu11 -fsyntax-only -I odyssey-poco-x7-v2/upstream/runtime odyssey-poco-x7-v2/upstream/runtime/tex_decode.c
+      - name: Compare 8,000 BC4/BC5 decoded images against official B0.2
+        shell: bash
+        run: python odyssey-poco-x7-v2/test_bc45_against_upstream.py
       - name: Confirm no game files or keys were tracked
         shell: bash
         run: |
