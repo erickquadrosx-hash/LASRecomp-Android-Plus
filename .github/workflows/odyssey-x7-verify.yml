@@ -1,0 +1,26 @@
+name: Odyssey X7 crash-fix patch validation
+
+on:
+  push:
+    branches: [odyssey-poco-x7-crashfix-20261107]
+    paths:
+      - "odyssey-poco-x7/**"
+      - ".github/workflows/odyssey-x7-verify.yml"
+  workflow_dispatch:
+
+jobs:
+  validate-repacker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check script syntax
+        run: python -m py_compile odyssey-poco-x7/repair.py odyssey-poco-x7/test_repair.py
+      - name: Test original DEX preservation on synthetic APK
+        run: python -m unittest discover -s odyssey-poco-x7 -p 'test_*.py' -v
+
+# No proprietary game APK, keys or signed app are uploaded or included.
+# To build an actual APK, execute repair.py with the owned input APK
+# and a local keystore (Android SDK Build Tools required).
