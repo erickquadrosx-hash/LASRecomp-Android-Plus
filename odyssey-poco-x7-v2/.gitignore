@@ -1,0 +1,26 @@
+# User-owned game files and private build outputs: NEVER commit to public GitHub.
+*.nsp
+*.xci
+*.nca
+*.nso
+*.elf
+*.tik
+*.npdm
+*.nacp
+*.keys
+prod.keys
+title.keys
+*.keystore
+*.jks
+*.p12
+*.obj
+*.o
+*.so
+*.apk
+*.x7backup
+private-dump/
+owned-elf/
+local-build/
+shaderc-build/
+__pycache__/
+*.pyc
