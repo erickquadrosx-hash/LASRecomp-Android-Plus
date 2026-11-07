@@ -4,6 +4,7 @@ on:
     branches: [odyssey-mali-g720-pipeline-20261107]
     paths:
       - "odyssey-poco-x7-v2/**"
+      - "odyssey-build-inputs/**"
       - ".github/workflows/odyssey-mali-g720-native.yml"
   workflow_dispatch:
     inputs:
@@ -77,11 +78,22 @@ jobs:
           OBJ=odyssey-build-inputs/Odyssey_257_Objetos_ARM64_Odyssey_Beta02_Provisorios.tar.gz
           if [[ ! -s "$SRC" && -n "$SOURCE_URL" ]]; then curl -fL --retry 3 --output "$SRC" "$SOURCE_URL"; fi
           if [[ ! -s "$OBJ" && -n "$OBJECTS_URL" ]]; then curl -fL --retry 3 --output "$OBJ" "$OBJECTS_URL"; fi
+          # Large source archives are split into three <= 22 MB chunks for GitHub mobile uploads.
+          # GitHub's browser does not accept a 63 MB single uploaded file.
+          PART_1=odyssey-build-inputs/odyssey-inputs.zip.part01
+          PART_2=odyssey-build-inputs/odyssey-inputs.zip.part02
+          PART_3=odyssey-build-inputs/odyssey-inputs.zip.part03
+          if [[ ! -s "$SRC" || ! -s "$OBJ" ]]; then
+            if [[ -s "$PART_1" && -s "$PART_2" && -s "$PART_3" ]]; then
+              cat "$PART_1" "$PART_2" "$PART_3" > "$RUNNER_TEMP/odyssey-inputs.zip"
+              echo "Reassembled three owner-supplied chunks into checksum-verifiable input ZIP."
+            fi
+          fi
           # Optional one-file upload via an owner-created GitHub Release.
           # The SHA-256 is pinned to the exact ZIP prepared from this user's prior files.
           if [[ ! -s "$SRC" || ! -s "$OBJ" ]]; then
             URL=https://github.com/erickquadrosx-hash/LASRecomp-Android-Plus/releases/download/odyssey-mali-inputs-20261107/Odyssey_Mali_G720_Build_SDK_NDK_Automatico_v03.zip
-            if curl -fsSL --retry 2 --output "$RUNNER_TEMP/odyssey-inputs.zip" "$URL"; then
+            if [[ -s "$RUNNER_TEMP/odyssey-inputs.zip" ]] || curl -fsSL --retry 2 --output "$RUNNER_TEMP/odyssey-inputs.zip" "$URL"; then
               echo "dbbf3c8f6463fcea3c7d760e7849a7988fa6361f5070344930a90654d899f022  $RUNNER_TEMP/odyssey-inputs.zip" | sha256sum -c -
               python - <<'PY'
           import zipfile, pathlib
