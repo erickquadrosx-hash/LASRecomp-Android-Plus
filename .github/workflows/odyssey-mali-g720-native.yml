@@ -134,7 +134,20 @@ jobs:
         run: |
           set -euo pipefail
           cd odyssey-poco-x7-v2/upstream
-          python tools/android/build_shaderc.py --out "$RUNNER_TEMP/odyssey-shaderc"
+          # B0.2 build_shaderc.py targets five modules and also builds x86_64.
+          # The runtime linker requires nine archives for arm64; build all in one pass.
+          mkdir -p "$RUNNER_TEMP/odyssey-shaderc"
+          cd "$RUNNER_TEMP/odyssey-shaderc"
+          "$ANDROID_NDK/ndk-build" NDK_PROJECT_PATH=. \
+            APP_BUILD_SCRIPT="$ANDROID_NDK/sources/third_party/shaderc/Android.mk" \
+            APP_STL=c++_static APP_ABI=arm64-v8a APP_PLATFORM=android-30 \
+            NDK_LIBS_OUT=libs -j4 \
+            shaderc shaderc_util glslang SPIRV-Tools SPIRV-Tools-opt \
+            OSDependent OGLCompiler HLSL SPIRV
+          for lib in libshaderc.a libshaderc_util.a libglslang.a libOSDependent.a libOGLCompiler.a libHLSL.a libSPIRV.a libSPIRV-Tools-opt.a libSPIRV-Tools.a; do
+            test -s "$SHADERC_LIBS/$lib" || { echo "::error::Missing $lib"; exit 3; }
+          done
+          cd "$GITHUB_WORKSPACE/odyssey-poco-x7-v2/upstream"
           python tools/android/build_runtime.py --abi arm64-v8a -j 4
           test -s build/android/arm64-v8a/lib/libsmo.so
           python tools/android/build_apk.py --abi arm64-v8a --release
