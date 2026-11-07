@@ -78,37 +78,17 @@ jobs:
           OBJ=odyssey-build-inputs/Odyssey_257_Objetos_ARM64_Odyssey_Beta02_Provisorios.tar.gz
           if [[ ! -s "$SRC" && -n "$SOURCE_URL" ]]; then curl -fL --retry 3 --output "$SRC" "$SOURCE_URL"; fi
           if [[ ! -s "$OBJ" && -n "$OBJECTS_URL" ]]; then curl -fL --retry 3 --output "$OBJ" "$OBJECTS_URL"; fi
-          # Large source archives are split into three <= 22 MB chunks for GitHub mobile uploads.
-          # GitHub's browser does not accept a 63 MB single uploaded file.
-          PART_1=odyssey-build-inputs/odyssey-inputs.zip.part01
-          PART_2=odyssey-build-inputs/odyssey-inputs.zip.part02
-          PART_3=odyssey-build-inputs/odyssey-inputs.zip.part03
-          if [[ ! -s "$SRC" || ! -s "$OBJ" ]]; then
-            if [[ -s "$PART_1" && -s "$PART_2" && -s "$PART_3" ]]; then
-              cat "$PART_1" "$PART_2" "$PART_3" > "$RUNNER_TEMP/odyssey-inputs.zip"
-              echo "Reassembled three owner-supplied chunks into checksum-verifiable input ZIP."
-            fi
+          # The owner has uploaded the two archives to the public GitHub Release.
+          # Prefer direct release assets; pin hashes to previously checked owner files.
+          RELEASE=https://github.com/erickquadrosx-hash/LASRecomp-Android-Plus/releases/download/Odyssey-Android-Mali-G720
+          if [[ ! -s "$SRC" ]]; then
+            curl --fail --location --retry 4 --retry-all-errors --output "$SRC" "$RELEASE/Odyssey_Codigo_C_Gerado_e_SDK_Beta02.tar.gz"
           fi
-          # Optional one-file upload via an owner-created GitHub Release.
-          # The SHA-256 is pinned to the exact ZIP prepared from this user's prior files.
-          if [[ ! -s "$SRC" || ! -s "$OBJ" ]]; then
-            URL=https://github.com/erickquadrosx-hash/LASRecomp-Android-Plus/releases/download/odyssey-mali-inputs-20261107/Odyssey_Mali_G720_Build_SDK_NDK_Automatico_v03.zip
-            if [[ -s "$RUNNER_TEMP/odyssey-inputs.zip" ]] || curl -fsSL --retry 2 --output "$RUNNER_TEMP/odyssey-inputs.zip" "$URL"; then
-              echo "dbbf3c8f6463fcea3c7d760e7849a7988fa6361f5070344930a90654d899f022  $RUNNER_TEMP/odyssey-inputs.zip" | sha256sum -c -
-              python - <<'PY'
-          import zipfile, pathlib
-          p=pathlib.Path('odyssey-build-inputs')
-          required=('Odyssey_Codigo_C_Gerado_e_SDK_Beta02.tar.gz',
-                    'Odyssey_257_Objetos_ARM64_Odyssey_Beta02_Provisorios.tar.gz')
-          with zipfile.ZipFile(pathlib.Path(__import__('os').environ['RUNNER_TEMP'])/'odyssey-inputs.zip') as z:
-              for name in required:
-                  with z.open(name) as source, (p/name).open('wb') as dest:
-                      import shutil
-                      shutil.copyfileobj(source, dest)
-          print('Extracted two owner-provided game archives from checksum-verified release bundle.')
-          PY
-            fi
+          if [[ ! -s "$OBJ" ]]; then
+            curl --fail --location --retry 4 --retry-all-errors --output "$OBJ" "$RELEASE/Odyssey_257_Objetos_ARM64_Odyssey_Beta02_Provisorios.tar.gz"
           fi
+          echo "b6dddb2f460077b9faab10a689daf05b09326c83d1ab928d7d13689c864a9d5d  $SRC" | sha256sum -c -
+          echo "8bdb430b637cf45ee91690282fddcc678379dee8114dbdf37f9d945554b4e6a7  $OBJ" | sha256sum -c -
           if [[ ! -s "$SRC" || ! -s "$OBJ" ]]; then
             echo "::error::NATIVE BUILD BLOCKED: two genuine owner-produced archives are absent. Previous launcher-only APKs do not contain relinkable objects."
             exit 2
