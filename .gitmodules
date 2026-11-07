@@ -1,0 +1,4 @@
+[submodule "odyssey-poco-x7-v2/upstream"]
+	path = odyssey-poco-x7-v2/upstream
+	url = https://github.com/Deez-coder/SMO-android-port.git
+	branch = main
