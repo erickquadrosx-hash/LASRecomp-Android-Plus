@@ -150,6 +150,7 @@ jobs:
           cd "$GITHUB_WORKSPACE/odyssey-poco-x7-v2/upstream"
           python tools/android/build_runtime.py --abi arm64-v8a -j 4
           test -s build/android/arm64-v8a/lib/libsmo.so
+          python -m pip install --disable-pip-version-check "Pillow>=10,<13"
           python tools/android/build_apk.py --abi arm64-v8a --release
           test -s build/android/odyssey-0.2.apk
           cp build/android/arm64-v8a/lib/libsmo.so "$GITHUB_WORKSPACE/Odyssey_Mali_G720_PipelineFix_libsmo.so"
