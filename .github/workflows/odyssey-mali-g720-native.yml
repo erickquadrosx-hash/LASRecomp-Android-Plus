@@ -1,0 +1,141 @@
+name: Odyssey Mali G720 - Native pipeline rebuild
+on:
+  push:
+    branches: [odyssey-mali-g720-pipeline-20261107]
+    paths:
+      - "odyssey-poco-x7-v2/**"
+      - ".github/workflows/odyssey-mali-g720-native.yml"
+  workflow_dispatch:
+    inputs:
+      source_archive_url:
+        description: "Download URL for owner's C/SDK generated archive"
+        required: false
+        type: string
+      objects_archive_url:
+        description: "Download URL for owner's 257 ARM64 object archive"
+        required: false
+        type: string
+permissions:
+  contents: read
+jobs:
+  validate-mali-source:
+    name: Check Mali fix against pinned B0.2
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify source and apply Mali patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC=odyssey-poco-x7-v2/upstream
+          test "$(git -C "$SRC" rev-parse HEAD)" = "4f71d3d67bdfb87f08449994ac64dcc8a7d18f28"
+          python -m py_compile odyssey-poco-x7-v2/apply_mali_pipeline_lookahead.py
+          python odyssey-poco-x7-v2/apply_mali_pipeline_lookahead.py "$SRC" --check
+          python odyssey-poco-x7-v2/apply_mali_pipeline_lookahead.py "$SRC"
+          git -C "$SRC" diff --check
+          grep -Fq 'Mali exact-key look-ahead enabled' "$SRC/runtime/nvn_vk_m4.c"
+          python odyssey-poco-x7-v2/apply_native_v2.py "$SRC"
+          python odyssey-poco-x7-v2/apply_native_v2.py "$SRC" --write
+          git -C "$SRC" diff --check
+      - name: Compile public decoder using host Clang
+        run: |
+          set -euo pipefail
+          clang -std=gnu11 -fsyntax-only -I odyssey-poco-x7-v2/upstream/runtime odyssey-poco-x7-v2/upstream/runtime/tex_decode.c
+  native-apk:
+    name: Rebuild libsmo.so and signed APK (owner archives required)
+    runs-on: ubuntu-24.04
+    needs: validate-mali-source
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Retrieve owner-supplied generated C/SDK and 257 ARM64 objects
+        shell: bash
+        env:
+          SOURCE_URL: ${{ inputs.source_archive_url }}
+          OBJECTS_URL: ${{ inputs.objects_archive_url }}
+        run: |
+          set -euo pipefail
+          mkdir -p odyssey-build-inputs
+          SRC=odyssey-build-inputs/Odyssey_Codigo_C_Gerado_e_SDK_Beta02.tar.gz
+          OBJ=odyssey-build-inputs/Odyssey_257_Objetos_ARM64_Odyssey_Beta02_Provisorios.tar.gz
+          if [[ ! -s "$SRC" && -n "$SOURCE_URL" ]]; then curl -fL --retry 3 --output "$SRC" "$SOURCE_URL"; fi
+          if [[ ! -s "$OBJ" && -n "$OBJECTS_URL" ]]; then curl -fL --retry 3 --output "$OBJ" "$OBJECTS_URL"; fi
+          if [[ ! -s "$SRC" || ! -s "$OBJ" ]]; then
+            echo "::error::NATIVE BUILD BLOCKED: two genuine owner-produced archives are absent. Previous launcher-only APKs do not contain relinkable objects."
+            exit 2
+          fi
+          tar -tzf "$SRC" >/dev/null
+          tar -tzf "$OBJ" >/dev/null
+      - name: Install official SDK 35, build-tools 35, NDK r28c
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358" "build-tools;35.0.0" "platforms;android-35"
+          echo "ANDROID_NDK=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+      - name: Extract genuine objects and apply exact Vulkan patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC="$GITHUB_WORKSPACE/odyssey-poco-x7-v2/upstream"
+          python - "$SRC" <<'PY'
+          import pathlib,sys,tarfile
+          root=pathlib.Path(sys.argv[1]).resolve()
+          for fname in ('Odyssey_Codigo_C_Gerado_e_SDK_Beta02.tar.gz','Odyssey_257_Objetos_ARM64_Odyssey_Beta02_Provisorios.tar.gz'):
+              with tarfile.open(pathlib.Path('odyssey-build-inputs')/fname,'r:gz') as tf:
+                  for m in tf.getmembers():
+                      p=(root/m.name).resolve()
+                      if not (p == root or root in p.parents) or not (m.isdir() or m.isfile()):
+                          raise SystemExit('Unsafe archive member: '+m.name)
+                  tf.extractall(root)
+          objs=list((root/'build/android/arm64-v8a/obj/main').glob('*.obj'))
+          if len(objs) < 200 or any(p.read_bytes()[:4] != bytes.fromhex('7f454c46') for p in objs):
+              raise SystemExit('Missing genuine ARM64 ELF objects')
+          if not (root/'build/android/gen/image.h').is_file():
+              raise SystemExit('Missing generated SDK tables')
+          print('Verified ARM64 game objects:',len(objs))
+          PY
+          python odyssey-poco-x7-v2/apply_native_v2.py "$SRC" --write
+          python odyssey-poco-x7-v2/apply_mali_pipeline_lookahead.py "$SRC"
+          git -C "$SRC" diff --check
+      - name: Compile Shaderc, libsmo.so, signed APK
+        shell: bash
+        env:
+          SMO_LAYOUT: android
+          SHADERC_LIBS: ${{ runner.temp }}/odyssey-shaderc/obj/local/arm64-v8a
+        run: |
+          set -euo pipefail
+          cd odyssey-poco-x7-v2/upstream
+          python tools/android/build_shaderc.py --out "$RUNNER_TEMP/odyssey-shaderc"
+          python tools/android/build_runtime.py --abi arm64-v8a -j 4
+          test -s build/android/arm64-v8a/lib/libsmo.so
+          python tools/android/build_apk.py --abi arm64-v8a --release
+          test -s build/android/odyssey-0.2.apk
+          cp build/android/arm64-v8a/lib/libsmo.so "$GITHUB_WORKSPACE/Odyssey_Mali_G720_PipelineFix_libsmo.so"
+          cp build/android/odyssey-0.2.apk "$GITHUB_WORKSPACE/Odyssey_Mali_G720_PipelineFix.apk"
+          sha256sum "$GITHUB_WORKSPACE"/Odyssey_Mali_G720_PipelineFix.* > "$GITHUB_WORKSPACE/SHA256SUMS.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Odyssey_Mali_G720_Native_APK_and_Library
+          path: |
+            Odyssey_Mali_G720_PipelineFix_libsmo.so
+            Odyssey_Mali_G720_PipelineFix.apk
+            SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
