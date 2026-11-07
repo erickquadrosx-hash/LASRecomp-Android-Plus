@@ -8,7 +8,7 @@ spec.loader.exec_module(mod)
 
 class LauncherPresetTests(unittest.TestCase):
     def test_insertion_and_defaults(self):
-        s = '        config.mkdirs();\n        c.addView(header("Performance"));\n    void graphicsPage() {\n'
+        s = '        config.mkdirs();\n        play.setOnClickListener(v -> startActivity(new Intent(this, GameActivity.class)));\n        c.addView(header("Performance"));\n    void graphicsPage() {\n'
         changed = mod.patch(s)
         for mark in ("installPocoProfile(false)", "installPocoProfile(true)", "frame_rate = 30",
                      "console_mode = handheld", "driver = system", "diagnostics = off",
