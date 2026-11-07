@@ -82,7 +82,10 @@ def transform(paths):
                 if (!next) return 0;
                 tmp = next; tmp_cap = grown;
             }"""
-    s = one(s, old, new, p)
+    # The original also has an unrelated OpenGL upload path with this line.
+    # Restrict the change to the Vulkan front-end texture reader.
+    front = s.index("int nvn_front_tex_read(")
+    s = s[:front] + one(s[front:], old, new, p)
     old = """size_t lin = L.lvl_linear_size[l], slice_in = lin / (size_t)(L.lvl_d[l] > 0 ? L.lvl_d[l] : 1);
             size_t slice_out = decode ? (size_t)L.lvl_w[l] * L.lvl_h[l] * (size_t)tex_decode_bytes_per_texel(decode) : 0;
             size_t need = lin + slice_out * (size_t)(L.lvl_d[l] > 0 ? L.lvl_d[l] : 1);"""
