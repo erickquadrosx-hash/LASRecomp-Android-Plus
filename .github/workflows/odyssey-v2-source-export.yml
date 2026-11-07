@@ -24,7 +24,7 @@ jobs:
           git archive --format=tar.gz --prefix=smo-android-b02/ HEAD > "$GITHUB_WORKSPACE/smo-android-b02-public-source.tar.gz"
           cd "$GITHUB_WORKSPACE"
           sha256sum smo-android-b02-public-source.tar.gz > source.sha256
-          tar tzf smo-android-b02-public-source.tar.gz | grep -q smo-android-b02/tools/lifter/recomp.py
+          tar tzf smo-android-b02-public-source.tar.gz | grep smo-android-b02/tools/lifter/recomp.py >/dev/null
       - uses: actions/upload-artifact@v4
         with:
           name: SMO_Android_B02_Public_Source_No_Game_Files
