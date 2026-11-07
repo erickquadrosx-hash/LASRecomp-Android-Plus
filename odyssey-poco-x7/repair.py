@@ -13,6 +13,50 @@ OLD = "com.mobileodyssey.game"
 NEW = "com.mobileodyssey.x7pr"
 assert len(OLD) == len(NEW)
 
+
+def bump_version_code(manifest: bytes) -> bytes:
+    """Use versionCode 2 to avoid same-version update ambiguity on Android 16."""
+    import struct
+    if manifest[:4] != b'\\x03\\x00\\x08\\x00':
+        return manifest  # synthetic test fixture, not Android binary XML
+    buf = bytearray(manifest)
+    strings = []
+    offset = 8
+    while offset < len(buf):
+        typ, head, size = struct.unpack_from('<HHI', buf, offset)
+        if size < head or size == 0:
+            raise ValueError('Invalid Android manifest chunk')
+        if typ == 1:
+            count = struct.unpack_from('<I', buf, offset + 8)[0]
+            flags = struct.unpack_from('<I', buf, offset + 16)[0]
+            start = struct.unpack_from('<I', buf, offset + 20)[0]
+            if flags & 0x100:
+                raise ValueError('Unexpected UTF-8 string pool')
+            for i in range(count):
+                pos = offset + start + struct.unpack_from('<I', buf, offset + head + i*4)[0]
+                n = struct.unpack_from('<H', buf, pos)[0]
+                if n & 0x8000:
+                    raise ValueError('Long AXML string not supported')
+                strings.append(buf[pos+2:pos+2+n*2].decode('utf-16le'))
+        elif typ == 0x102 and strings:
+            element_idx = struct.unpack_from('<I', buf, offset + 20)[0]
+            if strings[element_idx] == 'manifest':
+                start, step, count = struct.unpack_from('<HHH', buf, offset + 24)
+                found = 0
+                for i in range(count):
+                    pos = offset + 16 + start + i*step
+                    name = strings[struct.unpack_from('<I', buf, pos + 4)[0]]
+                    if name == 'versionCode':
+                        if buf[pos+15] != 0x10 or struct.unpack_from('<I', buf, pos+16)[0] != 1:
+                            raise ValueError('Expected versionCode 1')
+                        struct.pack_into('<I', buf, pos+16, 2)
+                        found += 1
+                if found != 1:
+                    raise ValueError('versionCode missing or duplicated')
+                return bytes(buf)
+        offset += size
+    raise ValueError('Android manifest root missing')
+
 def patch_apk(original, unsigned):
     changes = set()
     with zipfile.ZipFile(original) as source, zipfile.ZipFile(unsigned, "w") as target:
@@ -31,7 +75,10 @@ def patch_apk(original, unsigned):
                 continue
             if data.count(before) != 1:
                 raise RuntimeError(f"Unexpected package bytes in {item.filename}")
-            target.writestr(item, data.replace(before, after))
+            patched = data.replace(before, after)
+            if item.filename == "AndroidManifest.xml":
+                patched = bump_version_code(patched)
+            target.writestr(item, patched)
             changes.add(item.filename)
     expected = {"AndroidManifest.xml", "resources.arsc", "lib/arm64-v8a/libsmo.so"}
     if changes != expected:
