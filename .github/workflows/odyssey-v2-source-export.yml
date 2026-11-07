@@ -1,0 +1,35 @@
+name: Odyssey X7 V2 - Export clean public source
+on:
+  push:
+    branches: [odyssey-poco-x7pro-v2-20261107]
+    paths:
+      - ".github/workflows/odyssey-v2-source-export.yml"
+  workflow_dispatch:
+jobs:
+  export-source:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Check exact B0.2 upstream commit and archive source only
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd odyssey-poco-x7-v2/upstream
+          test "$(git rev-parse HEAD)" = "4f71d3d67bdfb87f08449994ac64dcc8a7d18f28"
+          git archive --format=tar.gz --prefix=smo-android-b02/ HEAD > "$GITHUB_WORKSPACE/smo-android-b02-public-source.tar.gz"
+          cd "$GITHUB_WORKSPACE"
+          sha256sum smo-android-b02-public-source.tar.gz > source.sha256
+          tar tzf smo-android-b02-public-source.tar.gz | grep -q smo-android-b02/tools/lifter/recomp.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SMO_Android_B02_Public_Source_No_Game_Files
+          path: |
+            smo-android-b02-public-source.tar.gz
+            source.sha256
+          if-no-files-found: error
+          retention-days: 7
