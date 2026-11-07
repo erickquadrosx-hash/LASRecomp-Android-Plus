@@ -15,7 +15,7 @@ def repack(original, dex, unsigned):
     if found != OFFICIAL_SHA256:
         raise ValueError("Unexpected source APK hash: " + found)
     code = dex.read_bytes()
-    if not code.startswith(b"dex\\n"):
+    if not code.startswith(b"dex\n"):
         raise ValueError("Invalid classes.dex")
     with zipfile.ZipFile(original) as src, zipfile.ZipFile(unsigned, "w") as dst:
         for item in src.infolist():
