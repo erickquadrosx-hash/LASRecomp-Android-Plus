@@ -17,7 +17,7 @@ assert len(OLD) == len(NEW)
 def bump_version_code(manifest: bytes) -> bytes:
     """Use versionCode 2 to avoid same-version update ambiguity on Android 16."""
     import struct
-    if manifest[:4] != b'\\x03\\x00\\x08\\x00':
+    if manifest[:4] != b'\x03\x00\x08\x00':
         return manifest  # synthetic test fixture, not Android binary XML
     buf = bytearray(manifest)
     strings = []
