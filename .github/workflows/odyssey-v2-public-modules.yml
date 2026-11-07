@@ -1,0 +1,63 @@
+name: Odyssey X7 V2 - Public module verification
+on:
+  push:
+    branches: [odyssey-poco-x7pro-v2-20261107]
+    paths:
+      - ".gitmodules"
+      - "odyssey-poco-x7-v2/**"
+      - ".github/workflows/odyssey-v2-public-modules.yml"
+  workflow_dispatch:
+jobs:
+  check-source-and-patches:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify pinned public B0.2 source modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C odyssey-poco-x7-v2/upstream rev-parse HEAD)" = "4f71d3d67bdfb87f08449994ac64dcc8a7d18f28"
+          for file in runtime/tex_decode.c runtime/nvn_gl.c runtime/nvn_vk.c runtime/nvn_vk_draw.c runtime/android/android_perf.c tools/android/build_shaderc.py tools/android/build_runtime.py tools/android/build_game.py tools/lifter/recomp.py; do
+            test -s "odyssey-poco-x7-v2/upstream/$file"
+          done
+          echo "Pinned source dependencies available"
+      - name: Python syntax and existing launcher tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile odyssey-poco-x7-v2/*.py
+          python -m unittest discover -s odyssey-poco-x7-v2 -p 'test_*.py' -v
+      - name: Apply native source corrections in isolated submodule checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          python odyssey-poco-x7-v2/apply_native_v2.py odyssey-poco-x7-v2/upstream
+          python odyssey-poco-x7-v2/apply_native_v2.py odyssey-poco-x7-v2/upstream --write
+          git -C odyssey-poco-x7-v2/upstream diff --check
+          grep -q 'bc45_decode_direct' odyssey-poco-x7-v2/upstream/runtime/tex_decode.c
+          grep -q 'g_target_ns = gfx_options()->fps30 ? 33333333' odyssey-poco-x7-v2/upstream/runtime/android/android_perf.c
+          echo "Native V2 source patches applied; no game-derived objects"
+      - name: Compile syntax check of patched texture decoder (host)
+        shell: bash
+        run: |
+          clang -std=gnu11 -fsyntax-only -I odyssey-poco-x7-v2/upstream/runtime odyssey-poco-x7-v2/upstream/runtime/tex_decode.c
+      - name: Confirm no game files or keys were tracked
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files -z | tr '\0' '\n' | grep -Ei '(^|/)(prod.keys|title.keys|main.elf|sdk.elf|.*\.(nsp|xci|nca|nso))$'; then
+            echo "Game-related file unexpectedly tracked" >&2
+            exit 1
+          fi
+          echo "Public source only, no keys or game dump tracked"
+# This action validates PUBLIC dependencies and source patches; it cannot produce
+# a fully rebuilt libsmo.so without private 1.0.0 ELF input owned by the builder.
