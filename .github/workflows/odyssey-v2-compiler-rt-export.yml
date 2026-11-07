@@ -24,14 +24,11 @@ jobs:
           NDK="$ANDROID_HOME/ndk/28.2.13676358"
           find "$NDK/toolchains/llvm/prebuilt/linux-x86_64" -type f \( -name 'libclang_rt.builtins-aarch64-android.a' -o -name 'libunwind.a' \) -print
           mkdir -p arm64-runtime-libs
-          mapfile -t found < <(find "$NDK/toolchains/llvm/prebuilt/linux-x86_64" -type f \( -name 'libclang_rt.builtins-aarch64-android.a' -o -name 'libunwind.a' \))
-          if [ "${#found[@]}" -lt 2 ]; then
-            echo "Expected compiler libs not found; listing candidates" >&2
-            find "$NDK/toolchains/llvm/prebuilt/linux-x86_64" -type f -name '*builtins*.a' | head -20
-            find "$NDK/toolchains/llvm/prebuilt/linux-x86_64" -type f -iname '*unwind*.a' | head -20
-            exit 1
-          fi
-          for f in "${found[@]}"; do cp -v "$f" arm64-runtime-libs/; done
+          BASE="$NDK/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/19/lib/linux"
+          test -s "$BASE/libclang_rt.builtins-aarch64-android.a"
+          test -s "$BASE/aarch64/libunwind.a"
+          cp "$BASE/libclang_rt.builtins-aarch64-android.a" arm64-runtime-libs/
+          cp "$BASE/aarch64/libunwind.a" arm64-runtime-libs/
           tar -czf compiler-rt-ndk28-arm64.tar.gz arm64-runtime-libs
           sha256sum compiler-rt-ndk28-arm64.tar.gz > compiler-rt.sha256
       - uses: actions/upload-artifact@v4
