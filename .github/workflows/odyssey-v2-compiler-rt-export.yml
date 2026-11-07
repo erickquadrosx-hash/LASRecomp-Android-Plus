@@ -1,0 +1,44 @@
+name: Odyssey V2 - Export Android compiler builtins/unwind
+on:
+  push:
+    branches: [odyssey-poco-x7pro-v2-20261107]
+    paths:
+      - ".github/workflows/odyssey-v2-compiler-rt-export.yml"
+  workflow_dispatch:
+jobs:
+  export-public-compiler-libraries:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 12
+    steps:
+      - name: Install NDK 28.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
+      - name: Locate and archive NDK compiler runtime libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          NDK="$ANDROID_HOME/ndk/28.2.13676358"
+          find "$NDK/toolchains/llvm/prebuilt/linux-x86_64" -type f \( -name 'libclang_rt.builtins-aarch64-android.a' -o -name 'libunwind.a' \) -print
+          mkdir -p arm64-runtime-libs
+          mapfile -t found < <(find "$NDK/toolchains/llvm/prebuilt/linux-x86_64" -type f \( -name 'libclang_rt.builtins-aarch64-android.a' -o -name 'libunwind.a' \))
+          if [ "${#found[@]}" -lt 2 ]; then
+            echo "Expected compiler libs not found; listing candidates" >&2
+            find "$NDK/toolchains/llvm/prebuilt/linux-x86_64" -type f -name '*builtins*.a' | head -20
+            find "$NDK/toolchains/llvm/prebuilt/linux-x86_64" -type f -iname '*unwind*.a' | head -20
+            exit 1
+          fi
+          for f in "${found[@]}"; do cp -v "$f" arm64-runtime-libs/; done
+          tar -czf compiler-rt-ndk28-arm64.tar.gz arm64-runtime-libs
+          sha256sum compiler-rt-ndk28-arm64.tar.gz > compiler-rt.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Odyssey_V2_Public_NDK28_ClangRT_ARM64
+          path: |
+            compiler-rt-ndk28-arm64.tar.gz
+            compiler-rt.sha256
+          retention-days: 7
+          if-no-files-found: error
