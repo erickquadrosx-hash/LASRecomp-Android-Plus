@@ -20,7 +20,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
+      - name: Locate preinstalled Android tools
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME}"
+          command -v sdkmanager || true
+          ls -la "$ANDROID_HOME/cmdline-tools" || true
       - name: Install Android SDK/NDK
         run: |
           yes | sdkmanager --licenses >/dev/null || true
