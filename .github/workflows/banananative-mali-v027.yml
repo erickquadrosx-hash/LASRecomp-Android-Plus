@@ -56,6 +56,56 @@ jobs:
           test -s banana/android/app/out/nxnative-android-mali.apk
           sha256sum banana/android/app/out/nxnative-android-mali.apk
           unzip -t banana/android/app/out/nxnative-android-mali.apk | tail -2
+      - name: Download original 0.2.7 packer runtime and restore native stage
+        run: |
+          python3 - <<'PY'
+          import hashlib, io, json, pathlib, urllib.request, zipfile
+          root=pathlib.Path('banana')
+          endpoint='https://git.eden-emu.dev/api/v1/repos/moceure/BananaNative/releases/tags/v0.2.7'
+          def get(url):
+              return urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent':'BananaNative-Mali-GitHubActions'}), timeout=90)
+          meta=json.load(get(endpoint))
+          files=meta.get('assets', [])
+          apk_asset=next((a for a in files if a.get('name')=='banana-native-v0.2.7.apk'),None)
+          if not apk_asset: raise RuntimeError('Official 0.2.7 APK asset not found; native stage cannot be assembled')
+          url=apk_asset.get('browser_download_url') or apk_asset.get('download_url')
+          apk=root/'official-v0.2.7.apk'
+          with get(url) as src, apk.open('wb') as dst:
+              while True:
+                  b=src.read(1024*1024)
+                  if not b: break
+                  dst.write(b)
+          digest=hashlib.sha256(apk.read_bytes()).hexdigest()
+          expected='d665a63332ed10bacd4c7607b2f0acae2ba6fa0a3fe40d0dd58c455210a6486e'
+          if digest!=expected: raise RuntimeError('Original 0.2.7 APK SHA-256 mismatch: '+digest)
+          stage=root/'build-stage'
+          libs=('libpython3.14.so','libnxpack.so','libzbicdec.so','libdmsh_xlate.so','libSPIRV-Tools-shared.so')
+          (stage/'lib').mkdir(parents=True,exist_ok=True)
+          (stage/'python').mkdir(parents=True,exist_ok=True)
+          with zipfile.ZipFile(apk) as z:
+              for lib in libs:
+                  (stage/'lib'/lib).write_bytes(z.read('lib/arm64-v8a/'+lib))
+              with zipfile.ZipFile(io.BytesIO(z.read('assets/pack/python.zip'))) as pyz:
+                  pyz.extractall(stage/'python')
+          assert (stage/'python/lib/python3.14/os.py').is_file()
+          print('Native packer stage restored from verified original APK:',digest)
+          PY
+      - name: Build complete BananaNative with native on-device game preparation
+        run: |
+          cd banana/android/app
+          ./gradlew --no-daemon --stacktrace -PnxPackStage="$GITHUB_WORKSPACE/banana/build-stage" -PnxPackEngine=native -PnxApp=malifull -PnxLabel="Banana Native Mali G720 Full Experimental" -PnxLsfg=false apk
+      - name: Verify full APK integrity and Android signature
+        run: |
+          APK=banana/android/app/out/nxnative-android-malifull.apk
+          test -s "$APK"
+          sha256sum "$APK"
+          unzip -t "$APK" | tail -1
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BananaNative-v027-Mali-G720-FULL-native-APK
+          path: banana/android/app/out/nxnative-android-malifull.apk
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: BananaNative-v027-Mali-G720-experimental-APK
