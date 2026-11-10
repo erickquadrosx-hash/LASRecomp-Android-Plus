@@ -91,5 +91,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: BananaNative-v027-Mali-G720-DMABUF-FULL-native-APK
-          path: banana/android/app/out/nxnative-android-malifull.apk
+          path: banana/android/app/out/nxnative-android-malidma.apk
           if-no-files-found: error
