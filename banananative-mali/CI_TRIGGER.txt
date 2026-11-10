@@ -1,0 +1,1 @@
+Trigger isolated BananaNative v0.2.7 Mali DMA-BUF native build. Main is unchanged.
