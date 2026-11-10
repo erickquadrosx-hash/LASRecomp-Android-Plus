@@ -1,0 +1,2 @@
+BananaNative 0.2.7 Mali-G720 DMA-BUF native APK workflow trigger.
+Build correction in dedicated branch; preserve main.
