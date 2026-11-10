@@ -1,0 +1,451 @@
+--- a/android/app/src/jvmtest/java/dev/nxnative/android/ReadinessJvmTest.java
++++ b/android/app/src/jvmtest/java/dev/nxnative/android/ReadinessJvmTest.java
+@@ -80,6 +80,28 @@
+         l = Readiness.evaluate(Readiness.merge(all, 8.0, 36), Readiness.parseReqs("required|ram_gib|10|Memory: a;degraded|ram_gib|14|Memory: b"));
+         check(find(l, "Memory").status == Readiness.Status.FAIL && Readiness.of(l, Readiness.Status.WARNING).isEmpty(), "the degraded row of a failed fact is left out");
+ 
++        // Mali fallback: a 64 KiB bidirectional AHardwareBuffer CPU alias is an experimental
++        // readiness warning, never an unconditional PASS. If the probe fails or is absent,
++        // placed mapping still fails; opaque-FD aliases retain their existing verified PASS.
++        Map<String, String> baseMali = Readiness.merge(all.replace("ext.VK_EXT_map_memory_placed=1\nfeature.memoryMapPlaced=1\n", ""), 14.7, 36);
++        l = Readiness.evaluate(baseMali, List.of());
++        check(find(l, "Placed memory maps").status == Readiness.Status.FAIL, "Mali without memory alias must fail");
++        Map<String, String> ahbMali = new java.util.HashMap<>(baseMali);
++        ahbMali.put("memory.ahbAlias", "1");
++        l = Readiness.evaluate(ahbMali, List.of());
++        check(!Readiness.any(l, Readiness.Status.FAIL) && find(l, "Placed memory maps").status == Readiness.Status.WARNING &&
++                find(l, "Placed memory maps").message.contains("GPU coherence"), "AHB provisional, not verified");
++        Map<String, String> fdMali = new java.util.HashMap<>(baseMali);
++        fdMali.put("memory.fdAlias", "1");
++        l = Readiness.evaluate(fdMali, List.of());
++        check(find(l, "Placed memory maps").status == Readiness.Status.PASS, "opaque FD alias known good");
++        Map<String, String> dmaMali = new java.util.HashMap<>(baseMali);
++        dmaMali.put("memory.fdAlias", "1"); dmaMali.put("memory.dmaBufAlias", "1");
++        l = Readiness.evaluate(dmaMali, List.of());
++        check(find(l, "Placed memory maps").status == Readiness.Status.WARNING &&
++                find(l, "Placed memory maps").message.contains("GPU coherence"), "DMA-BUF provisional, not verified");
++
++
+         // No Vulkan facts (no answer, or a host that cannot report): one warning, nothing called missing; the launcher's own facts still checked
+         l = Readiness.evaluate(Readiness.merge(null, 15, 32), game);
+         check(Readiness.of(l, Readiness.Status.FAIL).size() == 1 && find(l, "Android 13 or newer").status == Readiness.Status.FAIL && find(l, "GPU features").status == Readiness.Status.WARNING, "no facts: " + l);
+--- a/android/app/src/main/java/dev/nxnative/android/Readiness.java
++++ b/android/app/src/main/java/dev/nxnative/android/Readiness.java
+@@ -143,9 +143,14 @@
+             String key = r.fact + " " + r.min + " " + r.title;
+             if (seen.contains(key)) continue;   // the same requirement twice (the host's and a profile's)
+             seen.add(key);
+-            if ("1".equals(facts.get("memory.fdAlias")) && compare("1", r.min) >= 0 &&
++            if (("1".equals(facts.get("memory.fdAlias")) || "1".equals(facts.get("memory.ahbAlias"))) && compare("1", r.min) >= 0 &&
+                     (r.fact.equals("ext.VK_EXT_map_memory_placed") || r.fact.equals("feature.memoryMapPlaced") || r.fact.equals("ext.VK_KHR_map_memory2"))) {
+-                out.add(new Check(r.title, Status.PASS, "Guest-address memory is available through a tested exported-memory alias (memory.fdAlias=1).", null));
++                boolean experimentalAhb = "1".equals(facts.get("memory.ahbAlias"));
++                boolean experimentalDma = "1".equals(facts.get("memory.dmaBufAlias"));
++                out.add(new Check(r.title, experimentalAhb || experimentalDma ? Status.WARNING : Status.PASS,
++                        experimentalAhb ? "Experimental Android hardware buffer guest alias passed the CPU test; GPU coherence and gameplay are not verified."
++                                        : experimentalDma ? "Experimental DMA-BUF guest alias passed the CPU test; GPU coherence and gameplay are not verified."
++                                                          : "Guest-address memory is available through a tested exported Vulkan memory alias.", null));
+                 continue;
+             }
+             boolean ok = have != null && compare(have, r.min) >= 0;
+--- a/dm/gfx/vk_android/vka.h
++++ b/dm/gfx/vk_android/vka.h
+@@ -26,7 +26,7 @@
+     X(vkGetPhysicalDeviceSurfaceFormatsKHR) X(vkGetPhysicalDeviceSurfacePresentModesKHR)
+ #define VKA_DEVICE_FNS(X) \
+     X(vkGetDeviceQueue) X(vkDeviceWaitIdle) X(vkQueueSubmit) X(vkQueueWaitIdle) X(vkQueueBindSparse) X(vkGetImageSparseMemoryRequirements) \
+-    X(vkAllocateMemory) X(vkFreeMemory) X(vkMapMemory) X(vkUnmapMemory) X(vkMapMemory2KHR) X(vkUnmapMemory2KHR) X(vkGetMemoryFdKHR) \
++    X(vkAllocateMemory) X(vkFreeMemory) X(vkMapMemory) X(vkUnmapMemory) X(vkMapMemory2KHR) X(vkUnmapMemory2KHR) X(vkGetMemoryFdKHR) X(vkGetAndroidHardwareBufferPropertiesANDROID) \
+     X(vkCreateBuffer) X(vkDestroyBuffer) X(vkGetBufferMemoryRequirements) X(vkBindBufferMemory) X(vkGetBufferDeviceAddress) \
+     X(vkCreateImage) X(vkDestroyImage) X(vkGetImageMemoryRequirements) X(vkGetImageMemoryRequirements2) X(vkBindImageMemory) X(vkCreateImageView) X(vkDestroyImageView) \
+     X(vkCreateSampler) X(vkDestroySampler) \
+@@ -81,7 +81,7 @@
+ typedef struct {
+     VkInstance inst; VkPhysicalDevice pd; VkDevice dev; VkQueue q; uint32_t qf;
+     VkPhysicalDeviceProperties props; VkPhysicalDeviceMemoryProperties memp;
+-    int placed, placed_range, unmap_reserve, fd_alias, bda, uab, display_timing, has_android_surface;
++    int placed, placed_range, unmap_reserve, fd_alias, dma_buf_alias, ahb_alias, bda, uab, display_timing, has_android_surface;
+     int mem_budget;                                 // VK_EXT_memory_budget: the texture cache's limit reads the image heap's budget and usage (vka_tex.c, vka_texlimit.h)
+     void *perf_hint;                                // vkQueueSetPerfHintQCOM (VK_QCOM_queue_perf_hint), NULL without it: vka_gpu_floor
+     // The draw path's device facts: push descriptors (and how many a set may hold), vertex input dynamic state, robustness2's null descriptors, 8-bit indices,
+--- a/dm/gfx/vk_android/vka_dev.c
++++ b/dm/gfx/vk_android/vka_dev.c
+@@ -145,7 +145,15 @@
+     if (map2) dext[ndext++] = VK_KHR_MAP_MEMORY_2_EXTENSION_NAME;
+     if (placed) dext[ndext++] = VK_EXT_MAP_MEMORY_PLACED_EXTENSION_NAME;
+     int x_fd = has_ext(de, nde, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
++    int x_dma = x_fd && has_ext(de, nde, VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME);
+     if (x_fd) dext[ndext++] = VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME;
++    if (x_dma) dext[ndext++] = VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME;
++    int x_ahb = has_ext(de, nde, VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME)
++             && has_ext(de, nde, VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME);
++    if (x_ahb) {
++        dext[ndext++] = VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME;
++        dext[ndext++] = VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME;
++    }
+     if (V.display_timing) dext[ndext++] = VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME;
+     // The draw path (vka_draw.c): each one optional, with a fallback when absent
+     int x_push = has_ext(de, nde, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME), x_vin = has_ext(de, nde, VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME);
+@@ -220,8 +228,22 @@
+         if (!e || strcmp(e, "0")) V.placed = vka_placed_probe();
+     }
+     if (!V.placed && x_fd && vka_fd_enabled()) {
+-        char why[160]; V.fd_alias = vka_fd_probe(&vk, V.pd, V.dev, &V.memp, V.bda, why, sizeof why);
++        char why[160]; V.fd_alias = vka_fd_probe(&vk, V.pd, V.dev, &V.memp, V.bda, VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT, why, sizeof why);
+         VLOG("exported guest memory alias: %s (%s; DM_VK_FD_ALIAS=0: off)", V.fd_alias ? "on" : "unavailable", why);
++    }
++    // The proprietary driver may export DMA-BUF even when it cannot export OPAQUE_FD.
++    // Do not assume that either exported fd can be mmap-ed or used at a guest address.
++    if (!V.placed && !V.fd_alias && x_dma && vka_dma_buf_enabled()) {
++        char why[160]; V.dma_buf_alias = vka_fd_probe(&vk, V.pd, V.dev, &V.memp, V.bda,
++            VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT, why, sizeof why);
++        V.fd_alias = V.dma_buf_alias;
++        VLOG("DMA-BUF guest memory alias: %s (%s; DM_VK_DMA_BUF_ALIAS=0: off)", V.dma_buf_alias ? "on" : "unavailable", why);
++    }
++    if (!V.placed && !V.fd_alias && x_ahb && vka_ahb_enabled()) {
++        char why[160];
++        V.ahb_alias = vka_ahb_probe(&vk, V.pd, V.dev, &V.memp, V.bda, why, sizeof why);
++        V.fd_alias = V.ahb_alias;
++        VLOG("Android hardware buffer guest alias: %s (%s; DM_VK_AHB_ALIAS=0: off)", V.ahb_alias ? "on (experimental)" : "unavailable", why);
+     }
+     vk.vkGetDeviceQueue(V.dev, V.qf, 0, &V.q);
+     if (x_ph && fph.queuePerfHint) V.perf_hint = (void *)vk.vkGetDeviceProcAddr(V.dev, "vkQueueSetPerfHintQCOM");
+@@ -291,7 +313,7 @@
+          "uniform alignment %llu (range %llu), storage alignment %llu, subgroups %u (%u-%u)",
+          V.push_desc ? "yes" : "no", V.max_push, V.vin_dyn ? "yes" : "no", V.null_desc ? "yes" : "no", V.idx8 ? "yes" : "no", V.divisor ? "yes" : "no", V.logic_op ? "yes" : "no",
+          V.dual_src ? "yes" : "no", V.geom ? "yes" : "no", V.tess ? "yes" : "no", (unsigned long long)V.ub_align, (unsigned long long)V.ub_range, (unsigned long long)V.sb_align, V.subgroup_size, V.subgroup_min, V.subgroup_max);
+-    if (!V.placed && !V.fd_alias) VRED("no placed maps or exported guest memory alias: guest memory stays anonymous and the GPU sees no memory pool");
++    if (!V.placed && !V.fd_alias) VRED("no placed maps, OPAQUE_FD/DMA-BUF guest alias or Android hardware buffer alias: guest memory stays anonymous and the GPU sees no memory pool");
+     if (!swap) VRED("no VK_KHR_swapchain: nothing is presented");
+     vka_present_init();
+     return 1;
+--- a/dm/gfx/vk_android/vka_fd_alias.h
++++ b/dm/gfx/vk_android/vka_fd_alias.h
+@@ -7,6 +7,9 @@
+ #include <string.h>
+ #include <sys/mman.h>
+ #include <unistd.h>
++#include <android/hardware_buffer.h>
++#include <sys/socket.h>
++#include <sys/stat.h>
+ 
+ static VkBufferUsageFlags vka_guest_usage(int bda) {
+     return VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+@@ -14,22 +17,23 @@
+            VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT | (bda ? VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT : 0);
+ }
+ 
+-typedef struct { VkBuffer buf; VkDeviceMemory mem; void *mapped; int fd; } vka_fd_memory;
++typedef struct { VkBuffer buf; VkDeviceMemory mem; void *mapped; int fd; AHardwareBuffer *ahb; } vka_fd_memory;
+ 
+ static void vka_fd_destroy(vka_fns *f, VkDevice dev, vka_fd_memory *m) {
+     if (m->fd >= 0) close(m->fd);
+     if (m->mapped) f->vkUnmapMemory(dev, m->mem);
+     if (m->buf) f->vkDestroyBuffer(dev, m->buf, NULL);
+     if (m->mem) f->vkFreeMemory(dev, m->mem, NULL);
++    if (m->ahb) AHardwareBuffer_release(m->ahb);
+     *m = (vka_fd_memory){.fd = -1};
+ }
+ 
+ static VkResult vka_fd_create(vka_fns *f, VkPhysicalDevice pd, VkDevice dev, const VkPhysicalDeviceMemoryProperties *mp,
+-                              VkDeviceSize n, int bda, vka_fd_memory *out) {
++                              VkDeviceSize n, int bda, VkExternalMemoryHandleTypeFlagBits handle_type, vka_fd_memory *out) {
+     *out = (vka_fd_memory){.fd = -1};
+     if (!f->vkGetMemoryFdKHR || !f->vkGetPhysicalDeviceExternalBufferProperties) return VK_ERROR_EXTENSION_NOT_PRESENT;
+     VkPhysicalDeviceExternalBufferInfo qi = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_BUFFER_INFO, .usage = vka_guest_usage(bda),
+-                                            .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT};
++                                            .handleType = handle_type};
+     VkExternalBufferProperties ep = {VK_STRUCTURE_TYPE_EXTERNAL_BUFFER_PROPERTIES}; f->vkGetPhysicalDeviceExternalBufferProperties(pd, &qi, &ep);
+     if (!(ep.externalMemoryProperties.externalMemoryFeatures & VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT)) return VK_ERROR_FEATURE_NOT_PRESENT;
+     VkExternalMemoryBufferCreateInfo ei = {VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO, .handleTypes = qi.handleType};
+@@ -55,9 +59,12 @@
+ }
+ 
+ static int vka_fd_enabled(void) { const char *e = getenv("DM_VK_FD_ALIAS"); return !e || strcmp(e, "0"); }
++// DMA-BUF is a separate driver capability from OPAQUE_FD. Both must pass the complete
++// fixed-address, bidirectional CPU alias probe before any guest pool is exported.
++static int vka_dma_buf_enabled(void) { const char *e = getenv("DM_VK_DMA_BUF_ALIAS"); return !e || strcmp(e, "0"); }
+ 
+-static int vka_fd_probe(vka_fns *f, VkPhysicalDevice pd, VkDevice dev, const VkPhysicalDeviceMemoryProperties *mp, int bda, char *why, size_t whyn) {
+-    const size_t n = 65536; vka_fd_memory m; VkResult r = vka_fd_create(f, pd, dev, mp, n, bda, &m);
++static int vka_fd_probe(vka_fns *f, VkPhysicalDevice pd, VkDevice dev, const VkPhysicalDeviceMemoryProperties *mp, int bda, VkExternalMemoryHandleTypeFlagBits handle_type, char *why, size_t whyn) {
++    const size_t n = 65536; vka_fd_memory m; VkResult r = vka_fd_create(f, pd, dev, mp, n, bda, handle_type, &m);
+     if (r) { snprintf(why, whyn, "export allocation failed (%d)", r); return 0; }
+     void *at = mmap(NULL, n, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0); int ok = 0;
+     if (at != MAP_FAILED) {
+@@ -75,3 +82,116 @@
+     } else snprintf(why, whyn, "alias reservation failed (errno %d)", errno);
+     vka_fd_destroy(f, dev, &m); return ok;
+ }
++
++// Experimental guest-memory alias through Android hardware buffers. This is not an assertion that
++// Mali supports it: the imported Vulkan buffer and its dma-buf alias must refer to the same
++// allocation, at the guest's address. A probe is mandatory before enabling this backend.
++// The public NDK sendHandleToUnixSocket API carries the buffer's native FDs. Extract them through
++// SCM_RIGHTS and test every candidate against the Vulkan-mapped allocation: never assume that
++// the first FD is the data plane (some Android gralloc handles have metadata FDs too).
++static int vka_ahb_fd(AHardwareBuffer *ahb, void *vkmap, size_t n) {
++    int pair[2]; if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair)) return -1;
++    int fd = -1;
++    if (!AHardwareBuffer_sendHandleToUnixSocket(ahb, pair[0])) {
++        char body[512], anc[CMSG_SPACE(sizeof(int) * 32)];
++        struct iovec io = {.iov_base = body, .iov_len = sizeof body};
++        struct msghdr msg = {.msg_iov = &io, .msg_iovlen = 1, .msg_control = anc, .msg_controllen = sizeof anc};
++        ssize_t nr = recvmsg(pair[1], &msg, MSG_CMSG_CLOEXEC);
++        if (nr >= 0) for (struct cmsghdr *c = CMSG_FIRSTHDR(&msg); c; c = CMSG_NXTHDR(&msg, c)) {
++            if (c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_RIGHTS || c->cmsg_len < CMSG_LEN(0)) continue;
++            size_t count = (c->cmsg_len - CMSG_LEN(0)) / sizeof(int);
++            int *v = (int *)CMSG_DATA(c);
++            for (size_t k = 0; k < count; k++) {
++                // A successful CPU alias must be bidirectional and protectable; the caller's
++                // full-range probe checks again, after this short per-FD discovery test.
++                size_t testn = n < 65536 ? n : 65536;
++                struct stat st;
++                int sized = !fstat(v[k], &st) && st.st_size >= (off_t)testn;
++                void *q = fd < 0 && sized && !(msg.msg_flags & MSG_CTRUNC)
++                              ? mmap(NULL, testn, PROT_READ | PROT_WRITE, MAP_SHARED, v[k], 0) : MAP_FAILED;
++                if (q != MAP_FAILED) {
++                    volatile uint32_t *p = vkmap, *a = q;
++                    uint32_t old0 = p[0], old1 = p[1];
++                    p[0] = 0xa11a500du;
++                    int matches = a[0] == 0xa11a500du;
++                    if (matches) { a[1] = 0xb177abcdu; matches = p[1] == 0xb177abcdu; }
++                    p[0] = old0; p[1] = old1;
++                    if (matches) { fd = v[k]; v[k] = -1; }
++                    munmap(q, testn);
++                }
++                if (v[k] >= 0) close(v[k]);
++            }
++        }
++    }
++    close(pair[0]); close(pair[1]);
++    return fd;
++}
++static int vka_ahb_enabled(void) { const char *e = getenv("DM_VK_AHB_ALIAS"); return !e || strcmp(e, "0"); }
++
++static VkResult vka_ahb_create(vka_fns *f, VkPhysicalDevice pd, VkDevice dev, const VkPhysicalDeviceMemoryProperties *mp,
++                               VkDeviceSize n, int bda, vka_fd_memory *out) {
++    *out = (vka_fd_memory){.fd = -1};
++    PFN_vkGetAndroidHardwareBufferPropertiesANDROID getp = f->vkGetAndroidHardwareBufferPropertiesANDROID;
++    if (!getp || !f->vkGetPhysicalDeviceExternalBufferProperties) return VK_ERROR_EXTENSION_NOT_PRESENT;
++    if (n > UINT32_MAX - 65536 || !n) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
++    VkPhysicalDeviceExternalBufferInfo qi = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_BUFFER_INFO,
++         .usage = vka_guest_usage(bda), .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID};
++    VkExternalBufferProperties ep = {VK_STRUCTURE_TYPE_EXTERNAL_BUFFER_PROPERTIES};
++    f->vkGetPhysicalDeviceExternalBufferProperties(pd, &qi, &ep);
++    if (!(ep.externalMemoryProperties.externalMemoryFeatures & VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT)) return VK_ERROR_FEATURE_NOT_PRESENT;
++
++    uint32_t width = (uint32_t)((n + 65535) & ~(VkDeviceSize)65535);
++    AHardwareBuffer_Desc desc = {.width = width, .height = 1, .layers = 1, .format = AHARDWAREBUFFER_FORMAT_BLOB,
++                                 .usage = AHARDWAREBUFFER_USAGE_GPU_DATA_BUFFER | AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN | AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN};
++    if (AHardwareBuffer_allocate(&desc, &out->ahb)) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
++    VkAndroidHardwareBufferPropertiesANDROID hp = {VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_PROPERTIES_ANDROID};
++    VkResult r = getp(dev, out->ahb, &hp); if (r) goto fail;
++    VkExternalMemoryBufferCreateInfo ei = {VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO,
++        .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID};
++    VkBufferCreateInfo bi = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .pNext = &ei, .size = n,
++        .usage = qi.usage, .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
++    if ((r = f->vkCreateBuffer(dev, &bi, NULL, &out->buf))) goto fail;
++    VkMemoryRequirements mr; f->vkGetBufferMemoryRequirements(dev, out->buf, &mr);
++    if (hp.allocationSize < mr.size) { r = VK_ERROR_FEATURE_NOT_PRESENT; goto fail; }
++    const VkMemoryPropertyFlags hv = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
++    uint32_t type = UINT32_MAX;
++    for (uint32_t i=0; i<mp->memoryTypeCount; i++) if ((hp.memoryTypeBits & mr.memoryTypeBits & (1u << i)) &&
++        (mp->memoryTypes[i].propertyFlags & hv) == hv &&
++        (type == UINT32_MAX || (mp->memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT))) type = i;
++    if (type == UINT32_MAX) { r = VK_ERROR_FEATURE_NOT_PRESENT; goto fail; }
++    VkMemoryAllocateFlagsInfo af = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
++        .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT};
++    VkImportAndroidHardwareBufferInfoANDROID imp = {VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID,
++        .pNext = bda ? &af : NULL, .buffer = out->ahb};
++    VkMemoryAllocateInfo ai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .pNext = &imp,
++        .allocationSize = hp.allocationSize, .memoryTypeIndex = type};
++    if ((r = f->vkAllocateMemory(dev, &ai, NULL, &out->mem)) ||
++        (r = f->vkBindBufferMemory(dev, out->buf, out->mem, 0)) ||
++        (r = f->vkMapMemory(dev, out->mem, 0, VK_WHOLE_SIZE, 0, &out->mapped))) goto fail;
++    out->fd = vka_ahb_fd(out->ahb, out->mapped, (size_t)n);
++    if (out->fd < 0) { r = VK_ERROR_FEATURE_NOT_PRESENT; goto fail; }
++    return VK_SUCCESS;
++fail:
++    vka_fd_destroy(f, dev, out); return r;
++}
++
++static int vka_ahb_probe(vka_fns *f, VkPhysicalDevice pd, VkDevice dev, const VkPhysicalDeviceMemoryProperties *mp,
++                         int bda, char *why, size_t whyn) {
++    const size_t n = 65536; vka_fd_memory m; VkResult r = vka_ahb_create(f, pd, dev, mp, n, bda, &m);
++    if (r) { snprintf(why, whyn, "AHardwareBuffer import/alias allocation failed (%d)", r); return 0; }
++    void *at = mmap(NULL, n, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0); int ok = 0;
++    if (at != MAP_FAILED) {
++        void *a = mmap(at, n, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, m.fd, 0);
++        if (a != MAP_FAILED) {
++            volatile uint32_t *original = m.mapped, *alias = a; ok = 1;
++            for (size_t i = 0; i < n / 4; i++) original[i] = (uint32_t)i ^ 0x5eed1234;
++            for (size_t i = 0; i < n / 4; i++) if (alias[i] != ((uint32_t)i ^ 0x5eed1234)) { ok = 0; break; }
++            for (size_t i = 0; i < n / 4; i++) alias[i] = (uint32_t)i ^ 0xc0ffee00;
++            if (mprotect((char *)a + 4096, 4096, PROT_READ) || mprotect((char *)a + 4096, 4096, PROT_READ | PROT_WRITE)) ok = 0;
++            for (size_t i = 0; i < n / 4; i++) if (original[i] != ((uint32_t)i ^ 0xc0ffee00) || alias[i] != original[i]) { ok = 0; break; }
++            snprintf(why, whyn, "%s CPU bidirectional guest-address alias (GPU writes not checked)", ok ? "passed" : "failed");
++        } else snprintf(why, whyn, "AHardwareBuffer fd mmap failed (errno %d)", errno);
++        munmap(at, n);
++    } else snprintf(why, whyn, "alias reservation failed (errno %d)", errno);
++    vka_fd_destroy(f, dev, &m); return ok;
++}
+--- a/dm/gfx/vk_android/vka_mem.c
++++ b/dm/gfx/vk_android/vka_mem.c
+@@ -406,7 +406,9 @@
+     VkDeviceSize n = hi - lo; seg_t s = {lo, hi, .refs = 1}; VkResult r; uint64_t p0 = mono_ns(), p1, p2, p3, p4, p5;
+     vka_fd_memory exported = {.fd = -1};
+     if (V.fd_alias) {
+-        r = vka_fd_create(&vk, V.pd, V.dev, &V.memp, n, V.bda, &exported);
++        r = V.ahb_alias ? vka_ahb_create(&vk, V.pd, V.dev, &V.memp, n, V.bda, &exported)
++                        : vka_fd_create(&vk, V.pd, V.dev, &V.memp, n, V.bda,
++                            V.dma_buf_alias ? VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT : VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT, &exported);
+         if (r) { VRED("pool memory %#lx+%#llx: exported allocation %d", (unsigned long)lo, (unsigned long long)n, r); return 0; }
+         s.buf = exported.buf; s.mem = exported.mem; s.fd_alias = 1;
+     } else {
+@@ -454,6 +456,8 @@
+         }
+     }
+     if (exported.fd >= 0) close(exported.fd);
++    // Vulkan's imported memory holds its own reference to the hardware buffer.
++    if (exported.ahb) AHardwareBuffer_release(exported.ahb);
+     static int pf = -1; if (pf < 0) { const char *e = getenv("DM_VK_PREFAULT"); pf = !(e && !strcmp(e, "0")); if (!pf) VLOG("DM_VK_PREFAULT=0: placed maps are not faulted in (a diagnostic: DM_VK_NANSCAN's placed memory test shows whether the driver needs it)"); }
+     p3 = mono_ns();
+     if (ok && pf) prefault(lo, hi);   // before any mprotect splits the mapping (see prefault)
+--- a/dm/gfx/vk_android/vka_readiness.c
++++ b/dm/gfx/vk_android/vka_readiness.c
+@@ -30,7 +30,7 @@
+ 
+ // The extensions a requirement or the report may name; each one present is "ext.<name>=1"
+ static const char *const k_exts[] = {
+-    VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_MAP_MEMORY_2_EXTENSION_NAME, VK_EXT_MAP_MEMORY_PLACED_EXTENSION_NAME, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
++    VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_MAP_MEMORY_2_EXTENSION_NAME, VK_EXT_MAP_MEMORY_PLACED_EXTENSION_NAME, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME, VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME, VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME, "VK_ANDROID_external_memory_android_hardware_buffer", VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
+     VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME, VK_KHR_ROBUSTNESS_2_EXTENSION_NAME, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME, VK_KHR_INDEX_TYPE_UINT8_EXTENSION_NAME,
+     VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME, VK_KHR_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME, VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME,
+     VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME, VK_EXT_MESH_SHADER_EXTENSION_NAME, VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME, VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME,
+@@ -45,7 +45,7 @@
+ 
+ // A driver that has placed maps without advertising them (vka_dev.c vka_placed_probe: Qualcomm 512.863 on the Adreno 740): a device of its own on queue family 0,
+ // one placed map of a 64 KiB host-visible allocation at a reserved address through vkMapMemory2 (core 1.4 name). 1 when it lands there and reads back
+-static int placed_unadvertised(PFN_vkGetInstanceProcAddr gipa, VkInstance inst, VkPhysicalDevice pd, int map2_ext, int fd_ext, outbuf *o, int *fd_alias) {
++static int placed_unadvertised(PFN_vkGetInstanceProcAddr gipa, VkInstance inst, VkPhysicalDevice pd, int map2_ext, int fd_ext, int dma_ext, int ahb_ext, outbuf *o, int *fd_alias) {
+     const char *e = getenv("DM_VK_PLACED_PROBE"); int try_placed = !e || strcmp(e, "0");
+ #define I(f) PFN_##f f = (PFN_##f)gipa(inst, #f);
+     I(vkCreateDevice) I(vkGetDeviceProcAddr) I(vkGetPhysicalDeviceMemoryProperties)
+@@ -53,9 +53,14 @@
+ #undef I
+     if (!vkCreateDevice || !vkGetDeviceProcAddr || !vkGetPhysicalDeviceMemoryProperties) return 0;
+     float prio = 1; VkDeviceQueueCreateInfo q = {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .queueFamilyIndex = 0, .queueCount = 1, .pQueuePriorities = &prio};
+-    const char *exts[2]; uint32_t next = 0;
++    const char *exts[5]; uint32_t next = 0;
+     if (map2_ext) exts[next++] = VK_KHR_MAP_MEMORY_2_EXTENSION_NAME;
+     if (fd_ext) exts[next++] = VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME;
++    if (fd_ext && dma_ext) exts[next++] = VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME;
++    if (ahb_ext) {
++        exts[next++] = VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME;
++        exts[next++] = VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME;
++    }
+     VkPhysicalDeviceBufferDeviceAddressFeatures bda = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES};
+     VkPhysicalDeviceFeatures2 features = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &bda};
+     if (vkGetPhysicalDeviceFeatures2) vkGetPhysicalDeviceFeatures2(pd, &features);
+@@ -95,14 +100,30 @@
+             vkFreeMemory(dev, mem, NULL);
+         }
+     }
+-    if (!ok && fd_ext && vka_fd_enabled()) {
++    if (!ok && ((fd_ext && vka_fd_enabled()) || (fd_ext && dma_ext && vka_dma_buf_enabled()) || (ahb_ext && vka_ahb_enabled()))) {
+         vka_fns f = {.vkGetPhysicalDeviceExternalBufferProperties = (PFN_vkGetPhysicalDeviceExternalBufferProperties)gipa(inst, "vkGetPhysicalDeviceExternalBufferProperties")};
+ #define FD_LOAD(fn) f.fn = (PFN_##fn)vkGetDeviceProcAddr(dev, #fn);
+         FD_LOAD(vkCreateBuffer) FD_LOAD(vkDestroyBuffer) FD_LOAD(vkGetBufferMemoryRequirements) FD_LOAD(vkBindBufferMemory)
+         FD_LOAD(vkAllocateMemory) FD_LOAD(vkFreeMemory) FD_LOAD(vkMapMemory) FD_LOAD(vkUnmapMemory) FD_LOAD(vkGetMemoryFdKHR)
++        FD_LOAD(vkGetAndroidHardwareBufferPropertiesANDROID)
+ #undef FD_LOAD
+-        char why[160]; *fd_alias = vka_fd_probe(&f, pd, dev, &mp, bda.bufferDeviceAddress, why, sizeof why);
+-        put(o, "memory.fdAlias=%d\nmemory.fdAliasProbe=%s\n", *fd_alias, why);
++        char why[160];
++        if (fd_ext && vka_fd_enabled()) {
++            *fd_alias = vka_fd_probe(&f, pd, dev, &mp, bda.bufferDeviceAddress,
++                VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT, why, sizeof why);
++            put(o, "memory.opaqueFdAlias=%d\nmemory.opaqueFdAliasProbe=%s\n", *fd_alias, why);
++        }
++        if (!*fd_alias && fd_ext && dma_ext && vka_dma_buf_enabled()) {
++            int dma = vka_fd_probe(&f, pd, dev, &mp, bda.bufferDeviceAddress,
++                VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT, why, sizeof why);
++            *fd_alias = dma;
++            put(o, "memory.dmaBufAlias=%d\nmemory.dmaBufAliasProbe=%s\n", dma, why);
++        }
++        put(o, "memory.fdAlias=%d\n", *fd_alias);
++        if (!*fd_alias && ahb_ext && vka_ahb_enabled()) {
++            int ahb = vka_ahb_probe(&f, pd, dev, &mp, bda.bufferDeviceAddress, why, sizeof why);
++            put(o, "memory.ahbAlias=%d\nmemory.ahbAliasProbe=%s\n", ahb, why);
++        }
+     }
+     if (vkDestroyDevice) vkDestroyDevice(dev, NULL);
+     return ok;
+@@ -144,7 +165,7 @@
+     // Extensions
+     uint32_t nde = 0; vkEnumerateDeviceExtensionProperties(pd, NULL, &nde, NULL);
+     VkExtensionProperties *de = calloc(nde ? nde : 1, sizeof *de); vkEnumerateDeviceExtensionProperties(pd, NULL, &nde, de);
+-    int mesh = 0, placed = 0, map2_ext = 0, fd_ext = 0;
++    int mesh = 0, placed = 0, map2_ext = 0, fd_ext = 0, dma_ext = 0, ahb_ext = 0, foreign_ext = 0;
+     for (size_t k = 0; k < sizeof k_exts / sizeof *k_exts; k++)
+         for (uint32_t i = 0; i < nde; i++) if (!strcmp(de[i].extensionName, k_exts[k])) {
+             put(&o, "ext.%s=1\n", k_exts[k]);
+@@ -152,12 +173,15 @@
+             if (!strcmp(k_exts[k], VK_EXT_MAP_MEMORY_PLACED_EXTENSION_NAME)) placed = 1;
+             if (!strcmp(k_exts[k], VK_KHR_MAP_MEMORY_2_EXTENSION_NAME)) map2_ext = 1;
+             if (!strcmp(k_exts[k], VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME)) fd_ext = 1;
++            if (!strcmp(k_exts[k], VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME)) dma_ext = 1;
++            if (!strcmp(k_exts[k], VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME)) ahb_ext = 1;
++            if (!strcmp(k_exts[k], VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME)) foreign_ext = 1;
+             break;
+         }
+     put(&o, "ext.count=%u\n", nde);
+     free(de);
+     // Placed maps the driver has but does not advertise count as present (the replay uses them the same way: vka_dev.c)
+-    int fd_alias = 0, placed_hidden = !placed && placed_unadvertised(gipa, inst, pd, map2_ext, fd_ext, &o, &fd_alias);
++    int fd_alias = 0, placed_hidden = !placed && placed_unadvertised(gipa, inst, pd, map2_ext, fd_ext, dma_ext, ahb_ext && foreign_ext, &o, &fd_alias);
+     if (placed_hidden) put(&o, "ext.%s=1\next.%s=1\nplaced.unadvertised=1\n", VK_KHR_MAP_MEMORY_2_EXTENSION_NAME, VK_EXT_MAP_MEMORY_PLACED_EXTENSION_NAME);
+ 
+     // Driver identity (1.2 core) and the 1.1 / 1.3 properties the requirements may name
+--- a/dm/tools/tests/test_android_readiness.py
++++ b/dm/tools/tests/test_android_readiness.py
+@@ -48,6 +48,20 @@
+ 
+ 
+ class Tables(unittest.TestCase):
++    def test_dma_buf_fallback_wired(self):
++        """A DMA-BUF probe must never bypass the guest-address safety test."""
++        mem = (REPO / "dm/gfx/vk_android/vka_mem.c").read_text()
++        dev = (REPO / "dm/gfx/vk_android/vka_dev.c").read_text()
++        fd = (REPO / "dm/gfx/vk_android/vka_fd_alias.h").read_text()
++        ready = PROBE.read_text()
++        self.assertIn("VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT", mem)
++        self.assertIn("VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME", dev)
++        self.assertIn("V.fd_alias = V.dma_buf_alias", dev)
++        self.assertIn("VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT", fd)
++        self.assertIn("bidirectional fixed alias and mprotect", fd)
++        self.assertIn("memory.dmaBufAlias=%d", ready)
++        self.assertIn("memory.fdAlias=%d", ready)
++
+     def test_host_needs(self):   # Readiness.HOST names only reported facts: a misspelt extension would fail every phone
+         facts = probe_facts()
+         host = re.findall(r'new Req\(true, "([^"]+)"', (SRC / 'Readiness.java').read_text(encoding='utf-8'))
+--- a/docs/env_switches.tsv
++++ b/docs/env_switches.tsv
+@@ -379,6 +379,7 @@
+ DM_VK_ADPF_SPAN	diagnostic	`=<p>` (Android, live; unset: 100 when ADPF is the GPU clock floor, `DM_VK_GPU_FLOOR_ADPF`, else 0): ADPF reports each frame's span (recording start to the GPU end of its last submission) against p % of the game's shortest period (`DM_VK_GPU_FLOOR_PERIOD`) instead of the period against the period; `0` the old reports
+ DM_VK_AFF_ALL	diagnostic	`=<mask>` (Android, live, 0 = untouched) sets the CPU affinity of every thread of the process to that CPU bit mask when the value changes (`sched_setaffinity`); logs the thread count
+ DM_VK_AFF_REPLAY	diagnostic	`=<mask>` (Android, live, 0 = untouched) sets the replay worker thread's CPU affinity to that CPU bit mask when the value changes
++DM_VK_AHB_ALIAS	switch	`0` (Android, restart, on) disables the experimental Android Hardware Buffer fallback for guest-address memory when placed mapping and opaque FD export are unavailable; the readiness report includes `memory.ahbAlias=1` only when the CPU alias probe passes (not proof of GPU coherence or game compatibility)
+ DM_VK_BANDS	switch	`0` (Android, live: the next re-upload, 1) a tracked block-linear 2D texture whose storage the CPU wrote is re-uploaded whole instead of only the bands (one row of block rows, a range of its storage) with a written page (`vka_tex.c` `upload_bands_tracked`)
+ DM_VK_BAR_KEEP	diagnostic	`1` (Android, live, off): a game barrier inside an open draw pass is taken inside the pass when no draw of the pass wrote memory (later draws that write memory, read the texture pool or sample an attachment of the pass end it); `0` ends the pass at every barrier. Off until phone-checked
+ DM_VK_BC_RT	switch	`0` (Android, live, 1) a block-compressed texture drawn into through an uncompressed view of its blocks (a GPU block encoder) is not drawn into, as before, instead of through an uncompressed shadow copied into it after the pass
+@@ -393,6 +394,7 @@
+ DM_VK_DISPATCH_ORDER	switch	`1` (Android, live) records a full barrier after every compute dispatch, as before 2026-11-09; default `0`: the barrier after a dispatch waits until other GPU work follows in the same command buffer, and a barrier recorded meanwhile (the game's) settles it, so consecutive dispatches are ordered only by the game's own barriers, as on NVN (docs/reference/rendering.md "A full barrier after every dispatch")
+ DM_VK_DISPATCH_SKIP	diagnostic	`=<from>[,<to>]` (Android, live) dispatches from..to of each frame (by `DM_VK_DISPATCH_LOG`'s index; default to the end) are recorded without their `vkCmdDispatch`, to find the one that writes a wrong picture
+ DM_VK_DISPATCH_SKIP_KEY	diagnostic	`=<hex key>[,…]` (Android, read at each dispatch) the dispatches of those compute shaders are recorded without their `vkCmdDispatch`, as `DM_VK_DISPATCH_SKIP` does by index; with the replay's `--dump-gpu` it shows what a shader writes
++DM_VK_DMA_BUF_ALIAS	switch	`0` (Android, restart, on) skip the alternative guest-address CPU alias through Vulkan VK_EXT_external_memory_dma_buf, tested after opaque FD and before Android hardware buffers; it only activates after the full bidirectional fixed-address mmap/mprotect probe succeeds; the driver must advertise both VK_KHR_external_memory_fd and VK_EXT_external_memory_dma_buf; readiness reports memory.dmaBufAlias and memory.fdAlias
+ DM_VK_DONE_LAST	diagnostic	`1` (Android, live, off) the completion thread waits for the last fence handed to the queue instead of the next one, as before (it held earlier fences back until all queued work had run); for A/B runs
+ DM_VK_DRAW	diagnostic	`0` / `1` (Android, live) turns draws and dispatches off or on (their records are skipped; events, counters and fences still signal); default on with placed guest memory, off without it
+ DM_VK_DRAW_SKIP_KEY	diagnostic	`=<hex pixel shader key>[,…]` (Android, read once) the draws of those pixel shaders are not drawn (their render pass still opens and clears), to see one pass's share of the picture, as `DM_VK_DISPATCH_SKIP_KEY` does for dispatches
