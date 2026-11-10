@@ -27,10 +27,26 @@ jobs:
           ls -la "$ANDROID_HOME/cmdline-tools" || true
       - name: Install Android SDK/NDK
         run: |
+          set -euo pipefail
           SDKM=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort -V | tail -1)
           test -x "$SDKM"
           yes | "$SDKM" --licenses >/dev/null || true
-          "$SDKM" --install "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358" "cmake;3.22.1"
+          install_retry() {
+            local package="$1"
+            for attempt in 1 2 3 4; do
+              echo "Installing $package (attempt $attempt/4)"
+              if "$SDKM" --install "$package"; then return 0; fi
+              echo "::warning::sdkmanager failed for $package on attempt $attempt"
+              sleep 12
+            done
+            echo "::error::Unable to install $package after four attempts"
+            return 1
+          }
+          install_retry "platforms;android-36"
+          install_retry "build-tools;36.0.0"
+          install_retry "cmake;3.22.1"
+          install_retry "ndk;28.2.13676358"
+          test -x "$ANDROID_HOME/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
       - name: Fetch matching BananaNative v0.2.7 source
         run: |
           git clone --depth 1 --branch v0.2.7 https://git.eden-emu.dev/moceure/BananaNative.git banana
