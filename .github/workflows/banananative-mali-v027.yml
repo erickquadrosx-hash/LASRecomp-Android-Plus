@@ -1,7 +1,7 @@
-name: BananaNative v0.2.7 Mali G720 experimental build
+name: BananaNative v0.2.7 Mali G720 DMA-BUF native build
 on:
   push:
-    branches: [banananative-mali-v027-build-20261109]
+    branches: [banananative-mali-dmabuf-v027-build-20261109]
     paths:
       - 'banananative-mali/**'
       - '.github/workflows/banananative-mali-v027.yml'
@@ -35,27 +35,13 @@ jobs:
         run: |
           git clone --depth 1 --branch v0.2.7 https://git.eden-emu.dev/moceure/BananaNative.git banana
           git -C banana log -1 --oneline
-      - name: Apply exact user source patch
+      - name: Apply exact v0.2.7 Mali DMA-BUF source patch
         run: |
-          python3 - <<'PY'
-          import base64,zlib,pathlib
-          raw=zlib.decompress(base64.b64decode(pathlib.Path('banananative-mali/patch.zlib.b64').read_text().strip()))
-          pathlib.Path('banana/mali.patch').write_bytes(raw)
-          print('Applying patch of',len(raw),'bytes')
-          PY
+          set -euo pipefail
           cd banana
-          patch -p1 --dry-run < mali.patch
-          patch -p1 < mali.patch
-      - name: Build Ocarina of Time Mali test APK
-        run: |
-          cd banana/android/app
-          chmod +x gradlew
-          ./gradlew --no-daemon --stacktrace -PnxGames=0400486024DEC000 -PnxPackEngine=fake -PnxLsfg=false -PnxApp=mali -PnxLabel="Banana Native Mali G720 Experimental" apk
-      - name: Check produced APK
-        run: |
-          test -s banana/android/app/out/nxnative-android-mali.apk
-          sha256sum banana/android/app/out/nxnative-android-mali.apk
-          unzip -t banana/android/app/out/nxnative-android-mali.apk | tail -2
+          git apply --check ../banananative-mali/patch-dmabuf-v027.patch
+          git apply ../banananative-mali/patch-dmabuf-v027.patch
+          grep -q 'DMA-BUF guest memory alias' dm/gfx/vk_android/vka_dev.c
       - name: Download original 0.2.7 packer runtime and restore native stage
         run: |
           python3 - <<'PY'
@@ -93,21 +79,17 @@ jobs:
       - name: Build complete BananaNative with native on-device game preparation
         run: |
           cd banana/android/app
-          ./gradlew --no-daemon --stacktrace -PnxPackStage="$GITHUB_WORKSPACE/banana/build-stage" -PnxPackEngine=native -PnxApp=malifull -PnxLabel="Banana Native Mali G720 Full Experimental" -PnxLsfg=false apk
+          ./gradlew --no-daemon --stacktrace -PnxPackStage="$GITHUB_WORKSPACE/banana/build-stage" -PnxPackEngine=native -PnxGames=0400486024DEC000 -PnxApp=malidma -PnxLabel="Banana Native Mali G720 DMA-BUF" -PnxLsfg=false apk
       - name: Verify full APK integrity and Android signature
         run: |
-          APK=banana/android/app/out/nxnative-android-malifull.apk
+          APK=banana/android/app/out/nxnative-android-malidma.apk
           test -s "$APK"
           sha256sum "$APK"
           unzip -t "$APK" | tail -1
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
+          unzip -p "$APK" lib/arm64-v8a/libnxhost_0400486024DEC000.so | strings | grep -q 'DMA-BUF guest memory alias'
       - uses: actions/upload-artifact@v4
         with:
-          name: BananaNative-v027-Mali-G720-FULL-native-APK
+          name: BananaNative-v027-Mali-G720-DMABUF-FULL-native-APK
           path: banana/android/app/out/nxnative-android-malifull.apk
-          if-no-files-found: error
-      - uses: actions/upload-artifact@v4
-        with:
-          name: BananaNative-v027-Mali-G720-experimental-APK
-          path: banana/android/app/out/nxnative-android-mali.apk
           if-no-files-found: error
