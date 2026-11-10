@@ -1,0 +1,93 @@
+name: BananaNative 0.2.7 Mali-G720 corrected APK
+on:
+  push:
+    branches:
+      - banananative-mali-g720-ci-20261109
+    paths:
+      - 'banana-build/**'
+      - '.github/workflows/banana-mali-g720.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Retrieve exact upstream release source (mirror)
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch v0.2.7 https://git.eden-emu.dev/moceure/BananaNative.git source
+          echo "21923c6346230b3cce8006b45c5c61a2fd645830182fe578239e76d9ec2d85a2  source/dm/gfx/vk_android/vka_fd_alias.h" | sha256sum -c -
+          echo "9e4a97c3943ad31fde90219a83e3e96f24d48cda8aab34cfd02d9bb0b4212b99  source/dm/gfx/vk_android/vka_dev.c" | sha256sum -c -
+      - name: Apply consolidated Vulkan Mali DMA-BUF fix
+        run: |
+          set -euo pipefail
+          cd source
+          git apply --check ../banana-build/banana_v027_full_source.patch
+          git apply ../banana-build/banana_v027_full_source.patch
+          grep -q 'DMA-BUF guest memory alias' dm/gfx/vk_android/vka_dev.c
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Prepare Android SDK and NDK
+        run: |
+          set -euo pipefail
+          yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --install 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.2.13676358' 'cmake;3.22.1'
+      - name: Download and validate official APK for native packer libraries only
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 -o source/native-official.apk 'https://git.eden-emu.dev/moceure/BananaNative/releases/download/v0.2.7/banana-native-v0.2.7.apk'
+          echo 'd665a63332ed10bacd4c7607b2f0acae2ba6fa0a3fe40d0dd58c455210a6486e  source/native-official.apk' | sha256sum -c -
+      - name: Extract native packer stage (Vulkan host is NOT reused)
+        run: |
+          python3 - <<'PY'
+          import zipfile, pathlib, io, shutil
+          root=pathlib.Path('source')
+          stage=root/'stage-native'
+          libs=('libpython3.14.so','libnxpack.so','libzbicdec.so','libdmsh_xlate.so','libSPIRV-Tools-shared.so')
+          stage.mkdir(parents=True,exist_ok=True)
+          (stage/'lib').mkdir(exist_ok=True)
+          with zipfile.ZipFile(root/'native-official.apk') as apk:
+              for name in libs:
+                  data=apk.read('lib/arm64-v8a/'+name)
+                  assert data.startswith(b'\x7fELF')
+                  (stage/'lib'/name).write_bytes(data)
+              with zipfile.ZipFile(io.BytesIO(apk.read('assets/pack/python.zip'))) as p:
+                  for info in p.infolist():
+                      target=(stage/'python'/info.filename).resolve()
+                      assert target.is_relative_to((stage/'python').resolve())
+                      if info.is_dir():target.mkdir(parents=True,exist_ok=True)
+                      else:target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(p.read(info))
+          assert (stage/'python/lib/python3.14/os.py').is_file()
+          print('Native packer stage recovered from verified official APK')
+          PY
+      - name: Compile ARM64 Vulkan host and Android test APK
+        run: |
+          set -euo pipefail
+          cd source/android/app
+          chmod +x gradlew
+          ./gradlew --no-daemon -PnxApp=malidma -PnxLabel='Banana Native Mali DMA' -PnxGames=0400486024DEC000 -PnxPackStage="$GITHUB_WORKSPACE/source/stage-native" -PnxVersion=0.2.7-mali-dma -PnxPackEngine=native apk
+      - name: Validate compiled APK
+        run: |
+          set -euo pipefail
+          APK=source/android/app/out/nxnative-android-malidma.apk
+          test -s "$APK"
+          unzip -t "$APK" | tail -1
+          unzip -Z1 "$APK" | grep -q 'lib/arm64-v8a/libnxpack.so'
+          unzip -Z1 "$APK" | grep -q 'lib/arm64-v8a/libnxhost_0400486024DEC000.so'
+          unzip -p "$APK" lib/arm64-v8a/libnxhost_0400486024DEC000.so | strings | grep -q 'DMA-BUF guest memory alias'
+          sha256sum "$APK" | tee source/android/app/out/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: BananaNative-v027-Mali-G720-DMA-APK-UNTESTED
+          path: |
+            source/android/app/out/nxnative-android-malidma.apk
+            source/android/app/out/SHA256SUMS
+          if-no-files-found: error
